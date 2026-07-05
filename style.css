@@ -79,6 +79,11 @@ th, td { border-bottom: 1px solid var(--line); border-right: 1px solid var(--lin
 th { background: #f4f4f2; color: #343434; text-align: left; }
 tr:nth-child(even) td { background: #fafafa; }
 blockquote { margin: 24px 0; padding: 12px 18px; border-left: 4px solid var(--accent-2); background: #f7f8f6; color: #555; }
+.flow-diagram { margin: 24px 0 30px; padding: 18px 20px; border: 1px solid #ded9ce; background: #fbfaf7; overflow-x: auto; }
+.flow-row { display: flex; align-items: center; gap: 10px; min-width: max-content; }
+.flow-row + .flow-row { margin-top: 12px; padding-top: 12px; border-top: 1px dashed #ded9ce; }
+.flow-node { display: inline-flex; align-items: center; min-height: 34px; padding: 7px 12px; border: 1px solid #d8cdbf; background: #fff; color: #333; font-size: 13px; line-height: 1.45; white-space: nowrap; }
+.flow-arrow { color: var(--accent); font-family: "Source Code Pro", monospace; font-size: 16px; }
 .media-figure { margin: 26px auto 30px; }
 .media-figure img, .media-figure video { width: min(100%, 980px); display: block; margin: 0 auto; background: #111; box-shadow: 0 12px 34px rgba(0,0,0,.08); }
 .media-video video { width: min(100%, 1080px); }
