@@ -1,0 +1,424 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RoboMaster 自瞄系统技术报告 - 本猫</title>
+  <meta name="description" content="Robotics, vision, control and engineering notes.">
+  <link rel="stylesheet" href="../style.css">
+  <script>
+    window.MathJax = {
+      tex: { inlineMath: [['$', '$'], ['\\(', '\\)']], displayMath: [['$$', '$$'], ['\\[', '\\]']] },
+      svg: { fontCache: 'global' }
+    };
+  </script>
+  <script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
+</head>
+<body>
+  <div class="headband"></div>
+  <main class="shell">
+    <aside class="sidebar">
+      <section class="brand-panel">
+        <a class="brand" href="../index.html">
+          <i></i><span>本猫</span><i></i>
+        </a>
+        <p>Natsume Soseki's Cat</p>
+      </section>
+      <nav class="nav"><a class="" href="../index.html">Home</a><a class="" href="../tags.html">Tags</a><a class="" href="../archives.html">Archives</a></nav>
+      <section class="profile" id="about">
+        <img src="../assets/images/avatar.jpg" alt="本猫头像">
+        <strong>Benmao</strong>
+        <p>Robotics, vision, control and engineering notes.</p>
+        <div class="stats">
+          <span><b>3</b>posts</span>
+          <span><b>3</b>projects</span>
+          <span><b>14</b>tags</span>
+        </div>
+        <div class="profile-links">
+          <a href="https://github.com/BenmaoNeko" target="_blank" rel="noreferrer">GitHub</a>
+          <a href="https://space.bilibili.com/356576177" target="_blank" rel="noreferrer">Bilibili</a>
+        </div>
+      </section>
+      <section class="toc-panel">
+        <h2>Table of Contents</h2>
+        <div class="toc"><a href="#项目结构">项目结构</a><a href="#整体链路">整体链路</a><a href="#手眼标定">手眼标定</a><a href="#坐标系">坐标系</a><a href="#ekf-为什么是核心">EKF 为什么是核心</a><a href="#状态向量">状态向量</a><a href="#协方差矩阵-p">协方差矩阵 P</a><a href="#预测-f-和-q">预测：F 和 Q</a><a href="#观测-z-和-r">观测：z 和 R</a><a href="#从状态生成观测">从状态生成观测</a><a href="#kalman-gain-和更新">Kalman Gain 和更新</a><a href="#为什么是-ekf">为什么是 EKF</a></div>
+      </section>
+    </aside>
+    <section class="content-frame">
+      <article class="post-detail">
+    <header class="post-hero">
+      <p class="eyebrow">Robotics</p>
+      <h1>RoboMaster 自瞄系统技术报告</h1>
+      <div class="meta">Posted on 2026-07-06<span></span><a href="../tags.html">RoboMaster</a><a href="../tags.html">AutoAim</a><a href="../tags.html">EKF</a><a href="../tags.html">PnP</a><a href="../tags.html">Calibration</a></div>
+      <p class="summary">RCIA 2025 赛季自瞄系统拆解：从手眼标定、坐标系转换到 EKF 目标状态估计与调参优先级。</p>
+    </header>
+    <div class="post-body"><p>项目地址：<a href="https://github.com/BenmaoNeko/RCIA_SP25_Vision" target="_blank" rel="noreferrer">BenmaoNeko/RCIA_SP25_Vision</a></p>
+<p>这篇文章整理 RCIA 2025 赛季 RoboMaster 自瞄代码中最核心的两条主线：<strong>坐标系链路</strong> 和 <strong>EKF 目标状态估计</strong>。</p>
+<p>完整系统还包含手眼标定、YOLO 检测、OpenCV 角点提取、PnP 6DoF 解算、TF 坐标变换、Tracker 状态机、装甲板预测、弹道解算、选点优化、串口/CAN 通信等模块。这里不把所有工程细节平铺开，而是先把影响命中稳定性的骨架讲清楚。</p>
+<h2 id="项目结构">项目结构</h2>
+<pre><code class="language-text">RCIA_Vision_SP25/
+├── src/                              # 主程序入口：standard、standard_mpc、自瞄调试、打符调试等模式
+├── tasks/                            # 核心任务算法模块
+│   ├── auto_aim/                     # 装甲板自瞄链路：YOLO、PnP、Tracker、EKF、Aimer、Shooter
+│   ├── auto_buff/                    # 能量机关链路：扇叶检测、R 标中心、Buff PnP、预测和瞄准
+│   └── omniperception/               # 全向感知，多相机或辅助目标信息接入
+├── io/                               # 硬件与外部通信层
+│   ├── gimbal/                       # 云台状态读取与控制命令发送
+│   ├── huaray/                       # 华睿相机驱动
+│   ├── hikrobot/                     # 海康相机驱动
+│   ├── mindvision/                   # 迈德威视相机驱动
+│   ├── dm_imu/                       # 达妙 IMU 数据读取与姿态处理
+│   └── serial/                       # 串口通信基础库和协议收发
+├── tools/                            # EKF、弹道模型、数学工具、日志、绘图、录像
+├── configs/                          # 相机参数、手眼标定、算法阈值、控制参数
+├── calibration/                      # 相机标定、手眼标定、robot-world hand-eye 标定
+├── assets/                           # 标定图片、手眼数据、模型文件
+├── scripts/                          # 运行、打包、实验分析脚本
+├── tests/                            # 回归测试与调试验证脚本
+├── docs/                             # 设计方案、部署说明、阶段性计划
+├── docker/                           # miniPC / Docker 部署配置
+├── CMakeLists.txt                    # CMake 构建入口
+├── Dockerfile                        # 容器化构建环境
+├── docker-compose.yml                # CPU / 通用部署编排
+├── docker-compose.gpu.yml            # GPU / OpenVINO 加速部署编排
+├── autostart.sh                      # 上电自启动脚本
+└── watchdog.sh                       # 异常退出后的恢复脚本</code></pre>
+<h2 id="整体链路">整体链路</h2>
+<p>自瞄链路可以拆成五层。每一层都在向后传递更稳定、更接近控制输入的数据。</p>
+<div class="table-scroll"><table><thead><tr><th>层级</th><th>输入</th><th>输出</th><th>主要任务</th></tr></thead><tbody><tr><td>感知层</td><td>相机图像</td><td>装甲板候选框、关键点</td><td>图像采集、ROI 裁剪、YOLO 推理、角点整理</td></tr><tr><td>几何层</td><td>关键点、相机内参、外参</td><td>装甲板 6DoF 位姿</td><td>PnP 解算、相机系到云台系和 world 系转换</td></tr><tr><td>状态估计层</td><td>单帧观测</td><td>连续目标状态</td><td>Tracker 状态机、EKF 预测与更新</td></tr><tr><td>决策预测层</td><td>目标状态</td><td>瞄准装甲板与未来位置</td><td>小陀螺、前哨站、选板、延迟补偿</td></tr><tr><td>控制执行层</td><td>目标 yaw/pitch</td><td>云台命令、开火判断</td><td>弹道补偿、命令滤波、串口或 CAN 下发</td></tr></tbody></table></div>
+<p><strong>核心结论：</strong> 如果手眼标定和坐标系链路不准，后面的 EKF、选点和弹道解算都会在错误空间里工作。调参前必须先保证坐标系正确。</p>
+<h2 id="手眼标定">手眼标定</h2>
+<p>相机看到的是二维像素，云台控制的是 yaw / pitch，PnP 解出的三维点一开始也只在相机坐标系下。自瞄真正控制云台前，必须知道相机坐标系与云台坐标系之间的固定外参。</p>
+<div class="table-scroll"><table><thead><tr><th>量</th><th>含义</th><th>来源</th></tr></thead><tbody><tr><td><code>R_camera2gimbal</code></td><td>相机坐标系到云台坐标系的旋转矩阵</td><td>手眼标定或轴向关系推导</td></tr><tr><td><code>t_camera2gimbal</code></td><td>相机光心到云台坐标系原点的平移</td><td>手眼标定或机械测量</td></tr><tr><td><code>R_gimbal2imubody</code></td><td>云台坐标系到 IMU body 坐标系的旋转</td><td>手眼标定与 IMU 轴向组合验证</td></tr></tbody></table></div>
+<p>手眼标定的大致流程：</p>
+<ol><li>拍摄多组标定板图片，同时记录每张图片对应的 IMU 四元数。</li><li>检测棋盘格或圆点板角点。</li><li>使用 <code>solvePnP</code> 求出标定板相对于相机的位姿。</li><li>使用 IMU 姿态推导云台在世界参考下的姿态变化。</li><li>多组数据联立求解固定不变的 <code>camera -&gt; gimbal</code> 变换。</li><li>将结果写入 YAML 配置，供自瞄主程序使用。</li></ol>
+<p>项目中的配置示例：</p>
+<pre><code class="language-yaml">R_gimbal2imubody:
+  [
+    0.0174284885, -0.9998476952, -0.0009133884,
+    0.9984774386, 0.0174524064, -0.0523279852,
+    0.0523359562, 0.0000000000, 0.9986295348
+  ]
+
+camera_matrix:
+  [
+    2012.1683449357597, 0, 642.35233320940324,
+    0, 2012.4338767677586, 520.79624276774803,
+    0, 0, 1
+  ]
+
+distort_coeffs:
+  [
+    -0.062356500649481776,
+    0.12498737981001157,
+    -0.00015570305119216231,
+    -0.0013804623440217159,
+    0
+  ]
+
+R_camera2gimbal:
+  [
+    0, 0, 1,
+    -1, 0, 0,
+    0, -1, 0
+  ]
+
+t_camera2gimbal: [0.16440, 0.0, 0.03689]</code></pre>
+<p>这里有一个经验判断：如果 IMU 轴向组合不对，后续求出的 <code>R_camera2gimbal</code> 往往会被迫吸收 IMU 坐标错误。项目里的手眼标定脚本会穷举 24 种右手坐标系轴向组合，判断标准之一是相机安装 roll 是否接近真实机械安装状态。</p>
+<p><code>t_camera2gimbal</code> 这部分更建议结合机械图纸和实物测量。原因是常见手眼标定过程主要依靠云台旋转，平移激励不足；即使加入平移，结果也会被 PnP 精度、角点质量和相机内参误差影响。</p>
+<h2 id="坐标系">坐标系</h2>
+<p>这个项目的自瞄不是单纯的像素点控制，而是在多坐标系之间流动。</p>
+<div class="table-scroll"><table><thead><tr><th>坐标系</th><th>作用</th></tr></thead><tbody><tr><td>camera</td><td>PnP 初始输出所在坐标系</td></tr><tr><td>gimbal</td><td>云台 yaw / pitch 控制的核心基准</td></tr><tr><td>imu body</td><td>IMU 芯片自身轴向</td></tr><tr><td>imu abs</td><td>IMU 上电后的绝对参考系</td></tr><tr><td>world</td><td>EKF、目标预测、弹道解算使用的相对稳定坐标系</td></tr></tbody></table></div>
+<p>关键变换关系如下：</p>
+<div class="table-scroll"><table><thead><tr><th>变换</th><th>含义</th></tr></thead><tbody><tr><td><code>R_camera2gimbal</code></td><td>camera 到 gimbal</td></tr><tr><td><code>t_camera2gimbal</code></td><td>camera 原点到 gimbal 原点的平移</td></tr><tr><td><code>R_imubody2imuabs</code></td><td>IMU body 到上电绝对参考系</td></tr><tr><td><code>R_gimbal2imubody</code></td><td>gimbal 到 IMU body</td></tr><tr><td><code>R_gimbal2world</code></td><td>当前云台系到 world 系</td></tr></tbody></table></div>
+<p>几何层的核心代码如下。PnP 先得到目标在相机坐标系下的位置，再进入云台系和 world 系。</p>
+<pre><code class="language-cpp">void Solver::set_R_gimbal2world(const Eigen::Quaterniond &amp; q)
+{
+  Eigen::Matrix3d R_imubody2imuabs = q.toRotationMatrix();
+  R_gimbal2world_ =
+    R_gimbal2imubody_.transpose() * R_imubody2imuabs * R_gimbal2imubody_;
+}
+
+void Solver::solve(Armor &amp; armor) const
+{
+  const auto &amp; object_points =
+    (armor.type == ArmorType::big) ? BIG_ARMOR_POINTS : SMALL_ARMOR_POINTS;
+
+  cv::Vec3d rvec, tvec;
+  cv::solvePnP(
+    object_points, armor.points, camera_matrix_, distort_coeffs_, rvec, tvec, false,
+    cv::SOLVEPNP_IPPE);
+
+  Eigen::Vector3d xyz_in_camera;
+  cv::cv2eigen(tvec, xyz_in_camera);
+  armor.xyz_in_gimbal = R_camera2gimbal_ * xyz_in_camera + t_camera2gimbal_;
+  armor.xyz_in_world = R_gimbal2world_ * armor.xyz_in_gimbal;
+
+  cv::Mat rmat;
+  cv::Rodrigues(rvec, rmat);
+  Eigen::Matrix3d R_armor2camera;
+  cv::cv2eigen(rmat, R_armor2camera);
+
+  Eigen::Matrix3d R_armor2gimbal = R_camera2gimbal_ * R_armor2camera;
+  Eigen::Matrix3d R_armor2world = R_gimbal2world_ * R_armor2gimbal;
+
+  armor.ypr_in_gimbal = tools::eulers(R_armor2gimbal, 2, 1, 0);
+  armor.ypr_in_world = tools::eulers(R_armor2world, 2, 1, 0);
+  armor.ypd_in_world = tools::xyz2ypd(armor.xyz_in_world);
+}</code></pre>
+<p><code>R_gimbal2world</code> 的组合可以理解成：</p>
+<pre><code class="language-text">当前云台系
+  -&gt; R_gimbal2imubody
+IMU body
+  -&gt; R_imubody2imuabs
+IMU abs
+  -&gt; R_gimbal2imubody.transpose()
+world 系</code></pre>
+<p>也就是：</p>
+<p>$$ R_{gimbal \to world} = R_{gimbal \to imubody}^{T} R_{imubody \to imuabs} R_{gimbal \to imubody} $$</p>
+<p>这个 world 系本质上还是以当前机器人自身云台为参考的相对世界系。它可以消除云台姿态变化对目标观测的影响，但不能完全消除整车平移带来的影响。因此如果要进一步做跑打，需要额外引入车体速度、里程计或更完整的全局状态估计。</p>
+<h2 id="ekf-为什么是核心">EKF 为什么是核心</h2>
+<p>YOLO + PnP 每一帧都能给出一个目标位置，但测量值不是实际真值。</p>
+<pre><code class="language-text">armor.xyz_in_world = true_position + measurement_noise</code></pre>
+<p>PnP 会受到灯条角点、相机内参、曝光、侧视角、装甲板遮挡和解算方法影响。EKF 的任务不是简单“滤波”，而是维护一个对目标状态的连续信念：</p>
+<ul><li>目标当前大概在哪里。</li><li>目标速度和角速度大概是多少。</li><li>当前预测值有多可信。</li><li>新观测来了以后，应该相信预测多一点，还是相信观测多一点。</li></ul>
+<h2 id="状态向量">状态向量</h2>
+<p>本项目 EKF 估计的是整车状态，而不是单块装甲板状态。</p>
+<div class="table-scroll"><table><thead><tr><th>状态量</th><th>含义</th></tr></thead><tbody><tr><td><code>x, y, z</code></td><td>目标车旋转中心在 world 系下的位置</td></tr><tr><td><code>vx, vy, vz</code></td><td>目标车旋转中心速度</td></tr><tr><td><code>a</code></td><td>目标车当前旋转角</td></tr><tr><td><code>w</code></td><td>目标车旋转角速度</td></tr><tr><td><code>r</code></td><td>装甲板到车体旋转中心的半径</td></tr><tr><td><code>l</code></td><td>长短半径差，用于四装甲板非对称半径</td></tr><tr><td><code>h</code></td><td>高低装甲板高度差</td></tr></tbody></table></div>
+<p>写成代码中的顺序就是：</p>
+<pre><code class="language-text">x vx y vy z vz a w r l h</code></pre>
+<p>初始化时，会先从当前装甲板位置和半径反推车体中心。</p>
+<pre><code class="language-cpp">auto center_x = xyz[0] + r * std::cos(ypr[0]);
+auto center_y = xyz[1] + r * std::sin(ypr[0]);
+auto center_z = xyz[2];
+
+Eigen::VectorXd x0{
+  {center_x, 0, center_y, 0, center_z, 0, ypr[0], 0, r, 0, 0}
+};</code></pre>
+<p>需要注意：这里的 <code>x0</code> 表示整车中心状态，不是把单块装甲板位置直接塞进滤波器。</p>
+<h2 id="协方差矩阵-p">协方差矩阵 P</h2>
+<p>状态向量里的每个量都不是绝对可信的。<code>P</code> 维护的是状态估计的不确定性，以及状态量之间误差是否相关。</p>
+<p>以一维匀速模型为例：</p>
+<pre><code class="language-text">state = [x, vx]
+
+P =
+[ Var(x)       Cov(x, vx) ]
+[ Cov(vx, x)   Var(vx)    ]</code></pre>
+<p><code>Var(x)</code> 和 <code>Var(vx)</code> 描述单个状态的不确定性，<code>Cov(x, vx)</code> 描述位置误差和速度误差之间的相关性。EKF 每次预测都会让不确定性向前传播，每次观测更新又会按观测可信度收缩或修正不确定性。</p>
+<h2 id="预测-f-和-q">预测：F 和 Q</h2>
+<p>预测需要一个运动模型。项目里对位置和角度都采用近似匀速模型：</p>
+<pre><code class="language-text">x_new  = x + vx * dt
+vx_new = vx
+
+a_new  = a + w * dt
+w_new  = w</code></pre>
+<p>对应到状态转移矩阵 <code>F</code>：</p>
+<pre><code class="language-cpp">void Target::predict(double dt) {
+  Eigen::MatrixXd F{
+    {1, dt, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 1, dt, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 1, dt, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 1, dt, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}
+  };
+
+  double v1, v2;
+  if (name == ArmorName::outpost) {
+    v1 = process_noise_.outpost_accel_noise;
+    v2 = process_noise_.outpost_omega_noise;
+  } else {
+    v1 = process_noise_.normal_accel_noise;
+    v2 = process_noise_.normal_omega_noise;
+  }
+
+  auto a = dt * dt * dt * dt / 4;
+  auto b = dt * dt * dt / 2;
+  auto c = dt * dt;
+
+  Eigen::MatrixXd Q{
+    {a * v1, b * v1, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {b * v1, c * v1, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, a * v1, b * v1, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, b * v1, c * v1, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, a * v1, b * v1, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, b * v1, c * v1, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, a * v2, b * v2, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, b * v2, c * v2, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+  };
+
+  auto f = [&amp;](const Eigen::VectorXd &amp;x) -&gt; Eigen::VectorXd {
+    Eigen::VectorXd x_prior = F * x;
+    x_prior[6] = tools::limit_rad(x_prior[6]);
+    return x_prior;
+  };
+
+  if (this-&gt;convergened() &amp;&amp; this-&gt;name == ArmorName::outpost &amp;&amp;
+      std::abs(this-&gt;ekf_.x[7]) &gt; 2) {
+    this-&gt;ekf_.x[7] = this-&gt;ekf_.x[7] &gt; 0 ? 2.51 : -2.51;
+  }
+
+  ekf_.predict(F, Q, f);
+}</code></pre>
+<p><code>Q</code> 是过程噪声协方差矩阵。它描述的是：我对这个匀速模型本身有多不信任。</p>
+<div class="table-scroll"><table><thead><tr><th>参数</th><th>含义</th><th>调大后的效果</th><th>调小后的效果</th></tr></thead><tbody><tr><td><code>normal_accel_noise</code></td><td>普通目标平移加速度过程噪声</td><td>加减速跟随更快，但更容易抖</td><td>更平滑，但目标变速时滞后</td></tr><tr><td><code>normal_omega_noise</code></td><td>普通目标角加速度过程噪声</td><td>小陀螺相位跟随更快</td><td>角速度估计更稳但更钝</td></tr><tr><td><code>outpost_accel_noise</code></td><td>前哨站平移过程噪声</td><td>前哨站位置更容易被观测拉动</td><td>更信任前哨站固定位置</td></tr><tr><td><code>outpost_omega_noise</code></td><td>前哨站角速度过程噪声</td><td>更容易改变角速度估计</td><td>更接近固定转速假设</td></tr></tbody></table></div>
+<h2 id="观测-z-和-r">观测：z 和 R</h2>
+<p>虽然状态向量有 11 维，但每帧观测不是 11 维。代码里观测向量是：</p>
+<pre><code class="language-text">z = [yaw, pitch, distance, armor_yaw]</code></pre>
+<p>其中：</p>
+<ul><li><code>yaw</code>、<code>pitch</code>、<code>distance</code> 来自装甲板在 world 系下的位置。</li><li><code>armor_yaw</code> 来自装甲板姿态，也就是 <code>ypr_in_world[0]</code>。</li></ul>
+<p>项目中对 distance 的观测噪声做了额外处理。距离越远、侧视角越大，PnP 的 distance 越不可靠。</p>
+<pre><code class="language-cpp">auto center_yaw = std::atan2(armor.xyz_in_world[1], armor.xyz_in_world[0]);
+auto delta_angle = tools::limit_rad(armor.ypr_in_world[0] - center_yaw);
+
+double dist = std::abs(armor.ypd_in_world[2]);
+double range_scale = std::clamp(dist / 3.0, 1.0, 2.5);
+double side_scale = 1.0 + 4.0 * delta_angle * delta_angle;
+double dist_var = 1.0 * range_scale * range_scale * side_scale;
+
+Eigen::VectorXd R_dig{
+  {
+    4e-3,
+    4e-3,
+    dist_var,
+    log(std::abs(armor.ypd_in_world[2]) + 1) / 200 + 9e-2
+  }
+};
+
+Eigen::MatrixXd R = R_dig.asDiagonal();</code></pre>
+<p>如果 distance 残差超过 $3\sigma$，代码会丢弃这一次 distance 观测，改用预测值：</p>
+<pre><code class="language-cpp">Eigen::Vector4d z_pred = h(ekf_.x);
+double dist_residual = std::abs(z[2] - z_pred[2]);
+double dist_sigma = std::sqrt(dist_var);
+
+if (dist_residual &gt; 3.0 * dist_sigma) {
+  z[2] = z_pred[2];
+}</code></pre>
+<p>这个策略能抑制 PnP 距离突然跳变，但也带来一个风险：如果 distance 长时间不准，系统会越来越依赖内部预测，实际距离可能被带偏。因此 distance 通道的问题不能只靠 EKF 掩盖，前面的角点质量、内参、曝光、侧视角都要一起排查。</p>
+<h2 id="从状态生成观测">从状态生成观测</h2>
+<p>这里最容易误解的一点是：不是从 <code>z</code> 直接推出完整状态 <code>x</code>，而是先用当前状态 <code>x</code> 生成预测观测 <code>h(x)</code>，再比较真实观测 <code>z</code> 和预测观测 <code>h(x)</code> 的残差。</p>
+<pre><code class="language-text">当前状态 x
+  -&gt; h(x)
+预测观测 z_pred
+  -&gt; z - z_pred
+观测残差
+  -&gt; Kalman Gain
+修正状态 x</code></pre>
+<p>装甲板位置由整车状态生成：</p>
+<pre><code class="language-cpp">Eigen::Vector3d Target::h_armor_xyz(const Eigen::VectorXd &amp;x, int id) const {
+  auto angle = tools::limit_rad(x[6] + id * 2 * CV_PI / armor_num_);
+  auto use_l_h = (armor_num_ == 4) &amp;&amp; (id == 1 || id == 3);
+
+  auto r = (use_l_h) ? x[8] + x[9] : x[8];
+  auto armor_x = x[0] - r * std::cos(angle);
+  auto armor_y = x[2] - r * std::sin(angle);
+  auto armor_z = (use_l_h) ? x[4] + x[10] : x[4];
+
+  return {armor_x, armor_y, armor_z};
+}</code></pre>
+<p>对应的观测函数：</p>
+<pre><code class="language-cpp">auto h = [&amp;](const Eigen::VectorXd &amp;x) -&gt; Eigen::Vector4d {
+  Eigen::VectorXd xyz = h_armor_xyz(x, id);
+  Eigen::VectorXd ypd = tools::xyz2ypd(xyz);
+  auto angle = tools::limit_rad(x[6] + id * 2 * CV_PI / armor_num_);
+  return {ypd[0], ypd[1], ypd[2], angle};
+};</code></pre>
+<p>这解释了为什么 EKF 能估计角速度 <code>w</code>。单帧观测不到角速度，但连续帧里的 <code>armor_yaw</code> 残差会不断修正 <code>a</code>，而状态转移模型里又有：</p>
+<pre><code class="language-text">a_new = a + w * dt
+w_new = w</code></pre>
+<p>所以角速度来自连续姿态残差和运动模型共同约束，不是一帧直接算出来的。</p>
+<h2 id="kalman-gain-和更新">Kalman Gain 和更新</h2>
+<p>卡尔曼增益决定这一次融合里预测和观测各占多少权重。</p>
+<p>一维情况下可以粗略理解为：</p>
+<p>$$ K = \frac{P}{P + R} $$</p>
+<p>如果 <code>P</code> 大，说明预测不确定，<code>K</code> 会更接近 1，系统更相信观测。如果 <code>R</code> 大，说明观测不确定，<code>K</code> 会更小，系统更相信预测。</p>
+<p>项目中的完整更新逻辑：</p>
+<pre><code class="language-cpp">Eigen::VectorXd ExtendedKalmanFilter::update(
+  const Eigen::VectorXd &amp; z,
+  const Eigen::MatrixXd &amp; H,
+  const Eigen::MatrixXd &amp; R,
+  std::function&lt;Eigen::VectorXd(const Eigen::VectorXd &amp;)&gt; h,
+  std::function&lt;Eigen::VectorXd(const Eigen::VectorXd &amp;, const Eigen::VectorXd &amp;)&gt; z_subtract)
+{
+  Eigen::VectorXd x_prior = x;
+  Eigen::MatrixXd K = P * H.transpose() * (H * P * H.transpose() + R).inverse();
+
+  P = (I - K * H) * P * (I - K * H).transpose() + K * R * K.transpose();
+
+  x = x_add(x, K * z_subtract(z, h(x)));
+
+  Eigen::VectorXd residual = z_subtract(z, h(x));
+  Eigen::MatrixXd S = H * P * H.transpose() + R;
+  double nis = residual.transpose() * S.inverse() * residual;
+  double nees = (x - x_prior).transpose() * P.inverse() * (x - x_prior);
+
+  constexpr double nis_threshold = 0.711;
+  constexpr double nees_threshold = 0.711;
+
+  if (nis &gt; nis_threshold) {
+    nis_count_++;
+    data[&quot;nis_fail&quot;] = 1;
+  }
+
+  if (nees &gt; nees_threshold) {
+    nees_count_++;
+    data[&quot;nees_fail&quot;] = 1;
+  }
+
+  return x;
+}</code></pre>
+<p>矩阵维度关系：</p>
+<div class="table-scroll"><table><thead><tr><th>矩阵</th><th>维度</th><th>作用</th></tr></thead><tbody><tr><td><code>P</code></td><td>11 x 11</td><td>状态估计协方差</td></tr><tr><td><code>H</code></td><td>4 x 11</td><td>当前状态附近的观测函数雅可比</td></tr><tr><td><code>R</code></td><td>4 x 4</td><td>观测噪声协方差</td></tr><tr><td><code>K</code></td><td>11 x 4</td><td>把 4 维观测残差分配回 11 维状态</td></tr></tbody></table></div>
+<p>更新公式：</p>
+<pre><code class="language-text">residual = z - h(x)
+delta_x  = K * residual
+x_new    = x + delta_x</code></pre>
+<p>实际代码里 yaw / pitch / angle 都要用 <code>limit_rad</code> 做角度归一化，避免角度跨越 $-\pi$ 和 $\pi$ 时产生错误残差。</p>
+<h2 id="为什么是-ekf">为什么是 EKF</h2>
+<p>普通 KF 要求观测模型是线性的：</p>
+<pre><code class="language-text">z = Hx</code></pre>
+<p>但这里状态是：</p>
+<pre><code class="language-text">x vx y vy z vz a w r l h</code></pre>
+<p>观测是：</p>
+<pre><code class="language-text">yaw pitch distance armor_yaw</code></pre>
+<p>从状态到观测需要先生成某一块装甲板的三维位置，再转换成 yaw / pitch / distance。这显然不是线性关系，只能写成：</p>
+<pre><code class="language-text">z = h(x)</code></pre>
+<p>EKF 的做法是在当前状态附近把非线性函数 $h(x)$ 线性化，用雅可比矩阵 <code>H</code> 近似当前局部关系。它并没有真正“解决”非线性，只是在每一帧附近做局部线性近似。</p>
+<h2 id="调试优先级">调试优先级</h2>
+<p>如果自瞄效果不好，不建议一上来就盲调 EKF。更稳的顺序是：</p>
+<div class="table-scroll"><table><thead><tr><th>优先级</th><th>检查项</th><th>典型现象</th></tr></thead><tbody><tr><td>1</td><td>相机曝光、增益、颜色、ROI</td><td>检测不稳定、漏检、误检</td></tr><tr><td>2</td><td>相机内参和畸变</td><td>距离随位置漂移，PnP 重投影异常</td></tr><tr><td>3</td><td><code>R_camera2gimbal</code> / <code>t_camera2gimbal</code></td><td>整体 yaw / pitch 有系统偏移</td></tr><tr><td>4</td><td><code>R_gimbal2imubody</code></td><td>云台转动后 world 系目标漂移</td></tr><tr><td>5</td><td>Tracker 状态机</td><td>目标切换频繁、丢失后恢复慢</td></tr><tr><td>6</td><td><code>R</code> 观测噪声</td><td>PnP 噪声对状态影响过大或过小</td></tr><tr><td>7</td><td><code>Q</code> 过程噪声</td><td>目标变速跟不上，或估计抖动</td></tr><tr><td>8</td><td>选点、弹道、开火逻辑</td><td>跟踪稳定但命中窗口不好</td></tr></tbody></table></div>
+<p>配置文件里也把调参建议写进了注释，例如：</p>
+<pre><code class="language-yaml">normal_accel_noise: 50
+normal_omega_noise: 250
+outpost_accel_noise: 10
+outpost_omega_noise: 0.1
+
+armor_switch_hysteresis: 0.30
+armor_switch_cooldown_frames: 3
+
+yaw_offset: 0
+pitch_offset: -3
+comming_angle: 70
+leaving_angle: 25
+decision_speed: 2
+
+high_speed_delay_time: 0.1
+low_speed_delay_time: 0.1
+hold_last_valid_on_invalid: true
+invalid_hold_timeout_ms: 180</code></pre>
+<h2 id="终语">终语</h2>
+<p>这篇主要整理坐标系和 EKF，因为它们是自瞄系统里最容易被低估、但又最影响上限的部分。感知层、YOLO、传统灯条、PnP、弹道、选板和开火策略也很重要，但如果坐标系和状态估计没有理顺，后面的优化很容易变成互相补锅。</p>
+<p>从“能用”到“稳定好用”之间差距很大。调车时最重要的不是记住某个参数，而是能判断问题到底发生在感知、几何、估计、决策还是控制层。只有这样，调参才不是碰运气。</p></div>
+  </article>
+    </section>
+  </main>
+</body>
+</html>
