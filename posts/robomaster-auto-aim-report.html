@@ -54,10 +54,6 @@
     </header>
     <div class="post-body"><p>项目地址：<a href="https://github.com/BenmaoNeko/RCIA_SP25_Vision" target="_blank" rel="noreferrer">https://github.com/BenmaoNeko/RCIA_SP25_Vision</a></p>
 <p>项目背景：RCIA25赛季完整形态和联盟赛所使用的自瞄代码，实现了：手眼标定，yolo检测，opencv角点提取，pnp算法得到其对应的6DoF检测，TF树坐标系转换，卡尔曼滤波，整车估计，装甲板预测估计，弹道解算，选点优化等功能</p>
-<blockquote><strong>阅读重点：</strong> 这篇报告最核心的线索是：二维观测先进入统一坐标基准，再交给 EKF 做连续状态估计，最后服务预测、弹道和选点。</blockquote>
-<div class="flow-diagram">
-    <div class="flow-row"><span class="flow-node">图像观测</span><span class="flow-arrow">→</span><span class="flow-node">PnP 相机系</span><span class="flow-arrow">→</span><span class="flow-node">camera</span><span class="flow-arrow">→</span><span class="flow-node">gimbal 外参</span><span class="flow-arrow">→</span><span class="flow-node">gimbal</span><span class="flow-arrow">→</span><span class="flow-node">world 姿态</span><span class="flow-arrow">→</span><span class="flow-node">EKF 状态估计</span><span class="flow-arrow">→</span><span class="flow-node">预测 / 弹道 / 选点</span></div>
-  </div>
 <h2 id="项目结构">项目结构</h2>
 <pre><code class="language-text">RCIA_Vision_SP25/
 ├── src/                              # 主程序入口，包含 standard、standard_mpc、自瞄调试、打符调试等运行模式
@@ -91,7 +87,6 @@
 <ol><li><strong>感知层</strong>：完成图像采集、ROI 裁剪、YOLO 推理、关键点整理和候选目标输出。</li><li><strong>几何层</strong>：利用相机内参、畸变参数、手眼标定和 PnP，将二维像素观测还原为三维空间位姿。</li><li><strong>状态估计层</strong>：通过 Tracker 状态机和 EKF，把单帧不稳定观测转化为连续、可预测的目标状态。</li><li><strong>决策预测层</strong>：根据目标运动状态选择装甲板，处理普通目标、小陀螺目标、前哨站等不同情况，并计算发弹延迟后的目标位置。</li><li><strong>控制执行层</strong>：进行弹道补偿、yaw/pitch 指令生成、开火判断和串口下发，使算法结果最终变成云台动作。</li></ol>
 <p>在解构整个项目之前。首先我们就要进行最最重要的一步，和整个系统的前提</p>
 <h2 id="手眼标定">手眼标定</h2>
-<blockquote><strong>阅读重点：</strong> 先抓住 <code>camera -&gt; gimbal</code> 这段固定外参；这段一旦偏，PnP、world 转换、EKF 和弹道解算都会沿着错误坐标继续工作。</blockquote>
 <p>整个自瞄代码是运作在一个耦合度相当高的坐标系转化中的，也就无论是那一层都是运行在一棵庞大的TF树上的，那手眼标定的重要性就是相当于整棵TF的树根在哪里一样。也就是说如果一开始手眼标定都没有做好的话，整个系统是完全没有办法运行的。因此可见手眼标定的重要性。</p>
 <p>1.首先要知道的就是，相机看到的是二维像素，云台控制的是 yaw/pitch，而 PnP 解出来的三维坐标一开始也只是在“相机坐标系”下，自瞄真正要控制云台，就必须知道： 相机坐标系 和 云台坐标系 之间到底差了多少旋转、多少平移。</p>
 <p>这些对应在代码里面的就是： R_camera2gimbal：相机坐标系到云台坐标系的旋转矩阵 t_camera2gimbal：相机坐标系到云台坐标系的平移向量 R_gimbal2imubody：云台坐标系和 IMU 机体系之间的旋转关系</p>
@@ -101,7 +96,6 @@
   armor.xyz_in_world = R_gimbal2world_ * armor.xyz_in_gimbal;</code></pre>
 <p>所以手眼标定本质上提供的是 camera -&gt; gimbal 这段外参。如果这段错了，PnP 在相机坐标系里算得再准，转到云台坐标系后也会系统性偏移，后面的 EKF、装甲板预测、弹道解算都会基于错误空间位置工作</p>
 <p>就算其他的都不知道，那也要重点知道，手眼标定最终要输出什么 R_gimbal2imubody：云台坐标系到 IMU 机体系的旋转关系。 R_camera2gimbal：相机坐标系到云台坐标系的旋转关系。 t_camera2gimbal：相机原点到云台坐标系下的平移量。</p>
-<div class="table-scroll"><table><thead><tr><th>输出量</th><th>读这篇报告时先记住的作用</th></tr></thead><tbody><tr><td><code>R_camera2gimbal</code></td><td>把 PnP 得到的相机系方向转到云台系</td></tr><tr><td><code>t_camera2gimbal</code></td><td>补上相机原点到云台原点的平移</td></tr><tr><td><code>R_gimbal2imubody</code></td><td>让 IMU 姿态能够回到云台定义的坐标基准</td></tr></tbody></table></div>
 <p>具体输出的可以看这个手眼标定的：RCIA_Vision_SP25/run_手眼标定.sh。我们解决这个手眼标定不准的问题就是，通过这个手眼标定脚本的思路进行的 重点就是这个脚本会这个脚本会穷举 24 种右手坐标系轴向组合, 正确的 R_gimbal2imubody 应该让标定出来的相机安装 roll 接近 0 度。因为如果 IMU 轴向错了，后面再怎么标定，R_camera2gimbal 都会被迫吸收 IMU 坐标错误，结果会偏。 相机安装方式大概率不会绕roll进行太大角度的偏移,因此进行的延伸出来的一个判断标准.效果基本不会有问题. 然后值得一说的是,  t_camera2gimbal,这个部分,其实手眼标定的本质就是一个AX=BX的一个过程,一般来说,我们在进行标定的时候是只是进行的了云台的旋转,没有进行云台的平移,因此求出来的平移也是相当不准确的,以及,即使后续我们进行了云台的平移进行,也会受pnp算法的精度影响,应此建议直接通过sw的工程图,量相机光轴到云台坐标系云台(pitch轴的旋转中心)之间的距离是最准的.</p>
 <p>这里只对此项目的手眼标定进行简单的讲解,关于其他有关知识.如原点标定,棋盘标定之类的不在这里进行赘述.</p>
 <p>前面提到,整个自瞄是建立在耦合度相当高的坐标系转化中的,因此我们就需要对坐标系有一定的了解.</p>
@@ -111,7 +105,6 @@
 <p>云台坐标系:定在云台的pitch/yaw的中心点.同时也是最终输入的基准</p>
 <p>imu坐标系:这个可以分为imu body坐标系和imu abs坐标系 imu body坐标系的意思是,imu本身的自己的轴向,硬件出场的时候刻在芯片上面的 imu abs的意思是,上电的时候,在imu body 的基础上做的绝对参考,简单来说就是零点,imu输出的四原数q就是在这个imu abs的基础上面输出的 world坐标系:这个必须要知道的事情是,整个卡尔曼层都是作用在world坐标系上面的,世界坐标系不准卡尔曼层是没有办法正常工作的</p>
 <h2 id="坐标系转化">坐标系转化</h2>
-<blockquote><strong>阅读重点：</strong> 这一节不要把每个矩阵孤立看，要顺着“相机系 -&gt; 云台系 -&gt; world 系”的数据路径看。</blockquote>
 <p>有以下几个比较重要的转化关系: R_gimbal2imubody,R_imubody2imuabs，R_gimbal2world，R_camera2gimbal,R_gimbal2imubody_.transpose() * R_imubody2imuabs * R_gimbal2imubody_</p>
 <p>先看手眼标定进行的得到的R_camera2gimbal，t_camera2gimbal,R_gimbal2imubody这几个转化关系</p>
 <p>R_camera2gimbal:是相机坐标系转化到云台坐标. 也就是通过手眼标定的外参 代码:</p>
@@ -124,7 +117,6 @@ armor.xyz in gimbal=Rcamera2gimbal*xyz in camera +t camera2gimbal ;</code></pre>
 <p>R_gimbal2imubody:云台系向imu body系的转化 这里容易产生一个误会：既然我们做的是手眼标定，为什么配置里不是直接使用 <code>R_camera2imubody</code>，而是使用 <code>R_gimbal2imubody</code>？原因是本项目并没有把相机坐标系直接作为控制基准。PnP 得到目标在相机系下的位置后，代码会先通过 <code>R_camera2gimbal</code> 和 <code>t_camera2gimbal</code> 将目标转换到云台坐标系。因此云台坐标系是视觉结果进入控制系统前的核心中间坐标系。</p>
 <p>IMU 的作用则是提供当前云台姿态的绝对参考。由于 IMU body 坐标系和云台坐标系的轴向并不一定一致，所以需要 <code>R_gimbal2imubody</code> 描述二者之间的旋转关系。这样代码才能利用 IMU 四元数计算出 <code>R_gimbal2world</code>，再把云台系下的目标位置转换到 world 坐标系中。</p>
 <p>R_gimbal2world:云台坐标系到世界坐标系的旋转</p>
-<blockquote><strong>阅读重点：</strong> <code>R_gimbal2world</code> 的核心不是多乘了两个矩阵，而是把 IMU 给出的绝对姿态换回“云台坐标系定义下的 world”。</blockquote>
 <p><code>R_gimbal2world</code> 表示当前时刻云台坐标系到 world 坐标系的旋转关系 代码中先将 IMU 四元数 <code>q</code> 转换为旋转矩阵：</p>
 <pre><code class="language-cpp">Eigen::Matrix3d R_imubody2imuabs = q.toRotationMatrix();</code></pre>
 <p>这里的 R_imubody2imuabs 表示 IMU body 坐标系相对于 IMU 上电后绝对参考系的姿态。由于 IMU body 坐标系和云台坐标系的轴向并不完全一致，所以还需要用 R_gimbal2imubody 将这个姿态关系转换到云台坐标系定义下：</p>
@@ -133,9 +125,8 @@ armor.xyz in gimbal=Rcamera2gimbal*xyz in camera +t camera2gimbal ;</code></pre>
     * R_imubody2imuabs
     * R_gimbal2imubody_;</code></pre>
 <div class="flow-diagram">
-    <div class="flow-row"><span class="flow-node">当前云台坐标系</span><span class="flow-arrow">→</span><span class="flow-node">R_gimbal2imubody_</span><span class="flow-arrow">→</span><span class="flow-node">当前 IMU body</span><span class="flow-arrow">→</span><span class="flow-node">R_imubody2imuabs</span><span class="flow-arrow">→</span><span class="flow-node">IMU abs / 上电参考</span><span class="flow-arrow">→</span><span class="flow-node">R_gimbal2imubody_.transpose()</span><span class="flow-arrow">→</span><span class="flow-node">上电时云台坐标系 / world</span></div>
+    <div class="flow-row"><span class="flow-node">当前云台</span><span class="flow-arrow">→</span><span class="flow-node">R_gimbal2imubody</span><span class="flow-arrow">→</span><span class="flow-node">当前imu机体系</span><span class="flow-arrow">→</span><span class="flow-node">R_imubody2imuabs</span><span class="flow-arrow">→</span><span class="flow-node">IMU abs（上电时的IMU body）</span><span class="flow-arrow">→</span><span class="flow-node">R_gimbal2imubody⁻¹</span><span class="flow-arrow">→</span><span class="flow-node">上电的时候的云台坐标系（世界坐标系）</span></div>
   </div>
-<div class="table-scroll"><table><thead><tr><th>矩阵</th><th>方向</th><th>在这段里的作用</th></tr></thead><tbody><tr><td><code>R_gimbal2imubody_</code></td><td>当前云台 -&gt; 当前 IMU body</td><td>先把云台向量放到 IMU 机体系里</td></tr><tr><td><code>R_imubody2imuabs</code></td><td>当前 IMU body -&gt; IMU abs</td><td>使用 IMU 四元数进入上电绝对参考</td></tr><tr><td><code>R_gimbal2imubody_.transpose()</code></td><td>IMU body -&gt; 云台</td><td>把上电参考再换回云台定义下的 world</td></tr></tbody></table></div>
 <p>差不多是这样：当前云台——&gt;R_gimbal2imubody——&gt;得到当前imu机体系——&gt;R_imubody2imuabs——&gt;得到IMU abs（这个等于上电时的IMU body）——&gt;R_gimbal2imubody⁻¹——是不是就可以拿到上电的时候的云台坐标系了，这个就是世界坐标系</p>
 <p>可以仔细看一下这部分的代码,转换的R_gimbal2imubody_.transpose()乘R之后乘了原矩阵,简单梳理一下就是,R_gimbal2imubody_是云台→IMU机体,R_imubody2imuabs是IMU机体→IMU绝对,R_gimbal2imubody_.transpose()是R_imubody2gimbal也就是imu机体到云台 那串起来就是:云台——&gt;IMU body——&gt;IMU abs——&gt;云台（world） 即:R_imubody2gimbal * R_imubody2imuabs * R_gimbal2imubody 这三个矩阵组合后，得到的是 R_gimbal2world，也就是“当前云台坐标系到 world 坐标系”的旋转矩阵。</p>
 <p>这样得到的 R_gimbal2world 就可以把云台系下的目标位置转换到 world 系下：</p>
@@ -143,10 +134,6 @@ armor.xyz in gimbal=Rcamera2gimbal*xyz in camera +t camera2gimbal ;</code></pre>
 <p>转化成世界坐标系的目的是什么?就是为了消除云台本身旋转影响去掉.让后续EKF,预测,弹道解算等等都是可以在一个相对稳定的坐标系下工作</p>
 <p>注:有一点需要注意.为什么说没办法实现跑打呢?从这里就可以看出来,我们的建立的世界坐标系原点是通过imu abs +云台的轴向定义得到的(云台坐标系原点).也就是说我们从开始就假定我们的云台是一个完全静止的一个状态,但是实际上是我们的车是会移动的云台也是会移动的,世界坐标系的原点并非完全静止的,所以就会从中引入误差. 以及还需要提出一点,我们假定云台是完全静止是错误的吗?从结果来看,我的车往前走两米和对方的车向后退两米从解算来看没有区别,因为我们解算出来的全是相对位置并非绝对位置.所以这个假设不能说是错的.但是如果从卡尔曼的角度来看.我们真正想要的是对方的车的实际位置,也就是我们放进卡尔曼的矩阵当中都是以对方的车进行估计的,但是如果我们我们两方的车开始同时运动呢.对方做匀速运动,我方车做非匀速运动.但是我们坐标系的建立逻辑是假定自己的云台完全静止的.那我们的非匀速和对方的匀速全都会叠加在EKF对地方车的估计当中.从而失真.但是还是要说的是,卡尔曼本身是对事物进行高斯分布的信念进行的.那我们的车和对方的车都是呈现高斯分布,那两个高斯融合依旧还是高斯.所以可能对最终的效果影响并不会有想象中的大(过程噪声弱化). 这部分只是作为理论进行的推导,缺少实际实验的数据进行支撑,所以只在这里提出一个可能存在的优化方向.</p>
 <h2 id="ekf">EKF</h2>
-<blockquote><strong>阅读重点：</strong> 这里先不要把 EKF 简单看成“滤波”，而是看成“用观测残差修正一组带不确定性的目标状态”。</blockquote>
-<div class="flow-diagram">
-    <div class="flow-row"><span class="flow-node">运动模型 F / 过程噪声 Q</span><span class="flow-arrow">→</span><span class="flow-node">predict</span><span class="flow-arrow">→</span><span class="flow-node">预测状态 x 和 P</span><span class="flow-arrow">→</span><span class="flow-node">h(x) 生成预测观测</span></div><div class="flow-row"><span class="flow-node">真实观测 z / 观测噪声 R</span><span class="flow-arrow">→</span><span class="flow-node">残差 z - h(x)</span><span class="flow-arrow">→</span><span class="flow-node">Kalman Gain</span><span class="flow-arrow">→</span><span class="flow-node">修正状态 x 和 P</span></div>
-  </div>
 <p>作为整个自瞄系统的核心.理解卡尔曼才能真正触及到核心.我们一步步来理解就好.尽量从底层开始理解.</p>
 <p>首先我们先理解一个概念: 我们的系统每一帧确实都能通过 YOLO + PnP 得到一个目标位置。比如代码里会先得到相机系下的 tvec，再转成 armor.xyz_in_world。 但问题是：测量值不等于真实值。</p>
 <p>即我们的得到的数值是:armor.xyz_in_world=真值+噪声.也就是我们是必定无法得到真值的,得到的所有数值都是带有噪声的.</p>
@@ -287,7 +274,6 @@ vx_new = vx</code></pre>
 }</code></pre>
 <p>分为前哨站和运动目标两种.由于前哨战转速已知且近乎可以视为匀速运动,因此对前哨站的Q一般很小</p>
 <p>现在我们已经简单了解EKF中比较核心的工作矩阵 X状态向量用来放入我们想要估计的状态,p协方差矩阵用来描述这些状态量之间的不确定性,Z观测向量,R观测的协方差矩阵,F状态转移矩阵,Q过程噪声矩阵</p>
-<div class="table-scroll"><table><thead><tr><th>符号</th><th>在本文里的读法</th><th>先抓住的重点</th></tr></thead><tbody><tr><td><code>X</code></td><td>目标车状态</td><td>位置、速度、朝向、角速度和装甲板几何参数</td></tr><tr><td><code>P</code></td><td>对状态估计的不确定性</td><td>预测准不准，后面要不要更相信观测</td></tr><tr><td><code>Z</code></td><td>PnP 给出的当前观测</td><td>yaw、pitch、distance、armor_yaw</td></tr><tr><td><code>R</code></td><td>观测不确定性</td><td>distance、侧向角等会影响观测可信度</td></tr><tr><td><code>F</code></td><td>状态转移模型</td><td>假设短时间内匀速 / 匀角速度</td></tr><tr><td><code>Q</code></td><td>过程噪声</td><td>对“匀速模型是否可靠”的怀疑程度</td></tr><tr><td><code>K</code></td><td>Kalman Gain</td><td>把四维残差分配回 11 维状态修正量</td></tr></tbody></table></div>
 <p>但是这时候一定会疑问,我的Z明明只有yaw,pitch,distance,armor_yaw.怎么得出X中这么多的状态量?</p>
 <p>这就一定要搞清楚一件事情,不是用Z推到X,而是X推到Z.也就是我先假设一个状态量,然后在看Z是多少,再去修正我的预测 这就像,我在看一本书之前,我先按照我的假设里面是什么内容,然后我再翻开一页去对比我的假设,再去修正我的假设,然后再猜再翻</p>
 <p>流程是:</p>
