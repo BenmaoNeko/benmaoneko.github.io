@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>从第一性原理理解机械臂：FK、IK 与动力学 - 本猫</title>
+  <title>机械臂原理性推导 - 本猫</title>
   <meta name="description" content="Robotics, vision, control and engineering notes.">
   <link rel="stylesheet" href="../style.css">
   <script>
@@ -41,24 +41,22 @@
       </section>
       <section class="toc-panel">
         <h2>Table of Contents</h2>
-        <div class="toc"><a href="#0-先把研究对象说清楚">0. 先把研究对象说清楚</a><a href="#1-涉及到的各种表达">1. 涉及到的各种表达</a><a href="#2-正运动学-forward-kinematics-fk">2. 正运动学（Forward Kinematics, FK）</a><a href="#3-逆运动学-inverse-kinematics-ik">3. 逆运动学（Inverse Kinematics, IK）</a><a href="#4-雅可比矩阵-关节的小动作怎样传到末端">4. 雅可比矩阵：关节的小动作怎样传到末端</a><a href="#5-由雅可比得到加速度">5. 由雅可比得到加速度</a><a href="#6-末端的力怎样变成关节力矩">6. 末端的力怎样变成关节力矩</a><a href="#7-奇异位形-机械臂有些方向突然-不好动">7. 奇异位形：机械臂有些方向突然“不好动”</a><a href="#8-先从最简单的牛顿定律开始">8. 先从最简单的牛顿定律开始</a><a href="#9-先把二连杆的质心找出来">9. 先把二连杆的质心找出来</a><a href="#10-质心速度-把位置对时间求导">10. 质心速度：把位置对时间求导</a><a href="#11-从动能收集出惯性矩阵">11. 从动能收集出惯性矩阵</a></div>
+        <div class="toc"><a href="#1-涉及到的各种表达">1. 涉及到的各种表达</a><a href="#2-正运动学-forward-kinematics-fk">2. 正运动学（Forward Kinematics, FK）</a><a href="#3-逆运动学-inverse-kinematics-ik">3. 逆运动学（Inverse Kinematics, IK）</a><a href="#4-雅可比矩阵-关节的小动作怎样传到末端">4. 雅可比矩阵：关节的小动作怎样传到末端</a><a href="#5-由雅可比得到加速度">5. 由雅可比得到加速度</a><a href="#6-末端的力怎样变成关节力矩">6. 末端的力怎样变成关节力矩</a><a href="#7-奇异位形-机械臂有些方向突然-不好动">7. 奇异位形：机械臂有些方向突然“不好动”</a><a href="#8-先从最简单的牛顿定律开始">8. 先从最简单的牛顿定律开始</a><a href="#9-先把二连杆的质心找出来">9. 先把二连杆的质心找出来</a><a href="#10-质心速度-把位置对时间求导">10. 质心速度：把位置对时间求导</a><a href="#11-从动能收集出惯性矩阵">11. 从动能收集出惯性矩阵</a><a href="#12-势能对关节角求导-得到重力项">12. 势能对关节角求导，得到重力项</a></div>
       </section>
     </aside>
     <section class="content-frame">
       <article class="post-detail">
     <header class="post-hero">
       <p class="eyebrow">Robotics</p>
-      <h1>从第一性原理理解机械臂：FK、IK 与动力学</h1>
+      <h1>机械臂原理性推导</h1>
       <div class="meta">Posted on 2026-09-23<span></span><a href="../tags.html">robotics</a><a href="../tags.html">manipulator</a><a href="../tags.html">kinematics</a><a href="../tags.html">dynamics</a><a href="../tags.html">first-principles</a></div>
-      <p class="summary">从平面二连杆出发，推导 FK、IK、雅可比、奇异位形与动力学，用个人笔记式直觉串起重力补偿、惯性、科氏和离心项。</p>
+
     </header>
-    <div class="post-body"><h2 id="0-先把研究对象说清楚">0. 先把研究对象说清楚</h2>
-<p>我最初是先把机械臂调起来，很多疑问都是在调试时碰到的。后来回头看公式，才慢慢把正运动学、逆运动学、雅可比和动力学连到了一起。</p>
-<p>这篇笔记从平面二连杆开始：先把几何关系算清楚，再看速度、加速度和力矩。公式尽量从简单模型推出来，旁边也记下我自己当时怎么理解、怎么检查。</p>
+    <div class="post-body"><p><strong>本篇笔记重点在于各种机械臂的原理推导.公式的数学书写和推导基本都是AI书写.</strong></p>
+<p><strong>在此AI时代虽然不会亲自指出这种原理性的知识,但是想要成为真正的工程师,哪怕自己一行代码不写,哪怕全程vibe coding,但是仍然需要基本这种原理理解,算法推导的能力.这就是我写此篇笔记原因.</strong></p>
 <div class="math-block">$$
 q = [q_1,q_2,\ldots,q_n]^T.
 $$</div>
-<p>这个向量记录每个关节的位置。机械臂动起来以后，还要继续记录关节速度和加速度：</p>
 <div class="math-block">$$
 \dot q = \frac{dq}{dt},\qquad \ddot q=\frac{d^2q}{dt^2}.
 $$</div>
