@@ -1,0 +1,2024 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>从第一性原理理解机械臂：FK、IK 与动力学 - 本猫</title>
+  <meta name="description" content="Robotics, vision, control and engineering notes.">
+  <link rel="stylesheet" href="../style.css">
+  <script>
+    window.MathJax = {
+      tex: { inlineMath: [['$', '$'], ['\\(', '\\)']], displayMath: [['$$', '$$'], ['\\[', '\\]']] },
+      svg: { fontCache: 'global' }
+    };
+  </script>
+  <script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
+</head>
+<body>
+  <div class="headband"></div>
+  <main class="shell">
+    <aside class="sidebar">
+      <section class="brand-panel">
+        <a class="brand" href="../index.html">
+          <i></i><span>本猫</span><i></i>
+        </a>
+        <p>Natsume Soseki's Cat</p>
+      </section>
+      <nav class="nav"><a class="" href="../index.html">Home</a><a class="" href="../tags.html">Tags</a><a class="" href="../archives.html">Archives</a></nav>
+      <section class="profile" id="about">
+        <img src="../assets/images/avatar.jpg" alt="本猫头像">
+        <strong>Benmao</strong>
+        <p>Robotics, vision, control and engineering notes.</p>
+        <div class="stats">
+          <span><b>5</b>posts</span>
+          <span><b>3</b>projects</span>
+          <span><b>21</b>tags</span>
+        </div>
+        <div class="profile-links">
+          <a href="https://github.com/BenmaoNeko" target="_blank" rel="noreferrer">GitHub</a>
+          <a href="https://space.bilibili.com/356576177" target="_blank" rel="noreferrer">Bilibili</a>
+        </div>
+      </section>
+      <section class="toc-panel">
+        <h2>Table of Contents</h2>
+        <div class="toc"><a href="#0-先把研究对象说清楚">0. 先把研究对象说清楚</a><a href="#1-涉及到的各种表达">1. 涉及到的各种表达</a><a href="#2-正运动学-forward-kinematics-fk">2. 正运动学（Forward Kinematics, FK）</a><a href="#3-逆运动学-inverse-kinematics-ik">3. 逆运动学（Inverse Kinematics, IK）</a><a href="#4-雅可比矩阵-关节的小动作怎样传到末端">4. 雅可比矩阵：关节的小动作怎样传到末端</a><a href="#5-由雅可比得到加速度">5. 由雅可比得到加速度</a><a href="#6-末端的力怎样变成关节力矩">6. 末端的力怎样变成关节力矩</a><a href="#7-奇异位形-机械臂有些方向突然-不好动">7. 奇异位形：机械臂有些方向突然“不好动”</a><a href="#8-先从最简单的牛顿定律开始">8. 先从最简单的牛顿定律开始</a><a href="#9-先把二连杆的质心找出来">9. 先把二连杆的质心找出来</a><a href="#10-质心速度-把位置对时间求导">10. 质心速度：把位置对时间求导</a><a href="#11-从动能收集出惯性矩阵">11. 从动能收集出惯性矩阵</a></div>
+      </section>
+    </aside>
+    <section class="content-frame">
+      <article class="post-detail">
+    <header class="post-hero">
+      <p class="eyebrow">Robotics</p>
+      <h1>从第一性原理理解机械臂：FK、IK 与动力学</h1>
+      <div class="meta">Posted on 2026-09-23<span></span><a href="../tags.html">robotics</a><a href="../tags.html">manipulator</a><a href="../tags.html">kinematics</a><a href="../tags.html">dynamics</a><a href="../tags.html">first-principles</a></div>
+      <p class="summary">从平面二连杆出发，推导 FK、IK、雅可比、奇异位形与动力学，用个人笔记式直觉串起重力补偿、惯性、科氏和离心项。</p>
+    </header>
+    <div class="post-body"><h2 id="0-先把研究对象说清楚">0. 先把研究对象说清楚</h2>
+<p>我最初是先把机械臂调起来，很多疑问都是在调试时碰到的。后来回头看公式，才慢慢把正运动学、逆运动学、雅可比和动力学连到了一起。</p>
+<p>这篇笔记从平面二连杆开始：先把几何关系算清楚，再看速度、加速度和力矩。公式尽量从简单模型推出来，旁边也记下我自己当时怎么理解、怎么检查。</p>
+<div class="math-block">$$
+q = [q_1,q_2,\ldots,q_n]^T.
+$$</div>
+<p>这个向量记录每个关节的位置。机械臂动起来以后，还要继续记录关节速度和加速度：</p>
+<div class="math-block">$$
+\dot q = \frac{dq}{dt},\qquad \ddot q=\frac{d^2q}{dt^2}.
+$$</div>
+<p>那么根据这些假设要回答三件事：</p>
+<ol><li><strong>位置问题（运动学）</strong>：已知 $q$，末端位姿 $x$ 是什么？</li></ol>
+<div class="math-block">   $$
+   x=f(q).
+   $$</div>
+<ol start="2"><li><strong>速度问题（微分运动学）</strong>：已知 $\dot q$，末端速度 $\dot x$ 是什么？</li></ol>
+<div class="math-block">   $$
+   \dot x=J(q)\dot q.
+   $$</div>
+<ol start="3"><li><strong>力学问题（动力学）</strong>：为获得给定的 $q,\dot q,\ddot q$，各关节所需力矩 $\tau$ 是什么？</li></ol>
+<div class="math-block">   $$
+   \tau=M(q)\ddot q+C(q,\dot q)\dot q+g(q)+\tau_f-\tau_{\rm ext}.
+   $$</div>
+<p>其中 这里面定义的$M$ 是惯性矩阵，$C\dot q$ 是速度相关项（科氏项与离心项），$g$ 是重力项，$\tau_f$ 是摩擦项，$\tau_{\rm ext}$ 是外界施加在系统上的广义力矩。</p>
+<h3 id="0-2-从一个简单的二连杆模型推理开始">0.2 从一个简单的二连杆模型推理开始</h3>
+<p>我们在这里建立平面 $xy$ 坐标系：$x$ 轴水平向右，$y$ 轴竖直向上；重力加速度方向为 $-y$。二连杆均为刚体，两个关节均为转动关节。</p>
+<div class="table-scroll"><table><thead><tr><th>符号</th><th>含义</th></tr></thead><tbody><tr><td>$q_1,q_2$</td><td>第一、第二关节角；逆时针为正</td></tr><tr><td>$l_1,l_2$</td><td>两根连杆从关节到末端的长度</td></tr><tr><td>$m_1,m_2$</td><td>两根连杆的质量</td></tr><tr><td>$r_1,r_2$</td><td>每根连杆的关节到其质心距离</td></tr><tr><td>$I_1,I_2$</td><td>每根连杆绕自身质心、垂直平面的转动惯量</td></tr><tr><td>$g_0$</td><td>重力加速度的大小</td></tr><tr><td>$\tau_1,\tau_2$</td><td>两个关节的驱动力矩</td></tr></tbody></table></div>
+<p>其中这里要说明一下,角度 $q_2$ 是<strong>相对角</strong>：第二根连杆相对第一根连杆旋转 $q_2$。因此第二根连杆相对于世界坐标系的绝对角为：</p>
+<div class="math-block">$$
+\theta_2=q_1+q_2.
+$$</div>
+<p>但是绝大部分时候我们使用的都是相对角去计算</p>
+<p>---</p>
+<h2 id="1-涉及到的各种表达">1. 涉及到的各种表达</h2>
+<h3 id="1-1-点在不同坐标系中的表示">1.1 点在不同坐标系中的表示</h3>
+<p>同一个几何点 $P$，相对坐标系 $\{A\}$ 的坐标记作 ${}^A\!p$，相对坐标系 $\{B\}$ 的坐标记作 ${}^B\!p$。若 $\{B\}$ 原点在 $\{A\}$ 中的位置是 ${}^A\!p_B$，且 $\{B\}$ 相对 $\{A\}$ 的旋转矩阵为 ${}^A\!R_B$，则：</p>
+<div class="math-block">$$
+{}^A\!p = {}^A\!p_B+{}^A\!R_B\,{}^B\!p.
+$$</div>
+<p>这不是额外假设，而是向量首尾相接：从 $A$ 原点到点 $P$ 的向量，等于“从 $A$ 原点到 $B$ 原点”加上“从 $B$ 原点到 $P$”。后一个向量先要旋转到 $A$ 的坐标基下才能相加,也就是向量的基本表达,方向一致。</p>
+<h3 id="1-2-二维旋转矩阵的推导">1.2 二维旋转矩阵的推导</h3>
+<p>为了防止后续容易蒙.这里做了一个简易的推导,可以理解连续旋转时，旋转矩阵进行乘法，而由于二维旋转矩阵的特殊结构，矩阵乘法等价于旋转角度相加</p>
+<p>令单位向量 $e_x=[1,0]^T$ 绕原点逆时针旋转 $\theta$，得到：</p>
+<div class="math-block">$$
+e_x' = [\cos\theta,\sin\theta]^T.
+$$</div>
+<p>同理，$e_y=[0,1]^T$ 旋转后为：</p>
+<div class="math-block">$$
+e_y' = [-\sin\theta,\cos\theta]^T.
+$$</div>
+<p>把旋转后的两个新基向量作为矩阵的两列，得到：</p>
+<div class="math-block">$$
+R(\theta)=
+\begin{bmatrix}
+\cos\theta &amp; -\sin\theta\\
+\sin\theta &amp; \cos\theta
+\end{bmatrix}.
+$$</div>
+<p>任意向量 $p=[x,y]^T$ 旋转后为：</p>
+<div class="math-block">$$
+p'=R(\theta)p
+=
+\begin{bmatrix}
+x\cos\theta-y\sin\theta\\
+x\sin\theta+y\cos\theta
+\end{bmatrix}.
+$$</div>
+<p>旋转不改变长度，因此：</p>
+<div class="math-block">$$
+R^TR=I,\qquad R^{-1}=R^T=R(-\theta).
+$$</div>
+<p>连续旋转 $\alpha$ 和 $\beta$ 等价于旋转 $\alpha+\beta$：</p>
+<div class="math-block">$$
+R(\alpha)R(\beta)=R(\alpha+\beta).
+$$</div>
+<p>矩阵是<strong>相乘</strong>，角度才是相加</p>
+<h3 id="1-3-齐次变换与变换连乘">1.3 齐次变换与变换连乘</h3>
+<p>我们前面分别讨论了旋转和平移，但这只是为了方便好理解一些.因为真正的机械臂的每一节连杆通常会同时发生这两件事：</p>
+<ul><li>坐标系的方向发生改变，这是旋转R；</li><li>坐标系的原点发生移动，这是平移p。</li></ul>
+<p>如果分别写，表达式会变得很长。齐次变换的做法是：<strong>增加一个坐标维度，把旋转和平移放进同一个矩阵里</strong>。</p>
+<p>把旋转和平移合写为：</p>
+<div class="math-block">$$
+T=
+\begin{bmatrix}
+R &amp; p\\
+0 &amp; 1
+\end{bmatrix}.
+$$</div>
+<p>这里的 $R$ 描述方向变化，$p$ 描述原点的平移。右下角的 $1$ 和左下角的 $0$ 是为了让平移可以和旋转一起参与矩阵乘法。因此，齐次变换不是一种新的物理运动，而是统一记录旋转和平移的数学工具。</p>
+<p>二维点写成齐次坐标：</p>
+<div class="math-block">$$
+\bar p=
+\begin{bmatrix}x\\y\\1\end{bmatrix}.
+$$</div>
+<p>普通二维点只有 $(x,y)$ 两个数字。最后补上的 $1$ 不代表点真的多了一个空间方向，只是一个数学辅助量。它使下面的矩阵乘法能够同时完成“旋转后再平移”。</p>
+<p>则刚体变换为：</p>
+<div class="math-block">$$
+\bar p_A=
+\begin{bmatrix}
+R_{AB}&amp;p_{AB}\\0&amp;1
+\end{bmatrix}
+\bar p_B.
+$$</div>
+<p>把这个乘法展开，就得到：</p>
+<div class="math-block">$$
+\begin{bmatrix}
+R_{AB}&amp;p_{AB}\\0&amp;1
+\end{bmatrix}
+\begin{bmatrix}{}^B\!p\\1\end{bmatrix}
+=
+\begin{bmatrix}R_{AB}{}^B\!p+p_{AB}\\1\end{bmatrix}.
+$$</div>
+<p>因此它仍然只做两件事：先旋转点的坐标，再加上平移量。</p>
+<p>这里 $T_A^B$ 的意思是：<strong>把 $\{B\}$ 坐标系中的坐标转换成 $\{A\}$ 坐标系中的坐标</strong>。上标表示结果使用哪个坐标系，下标表示原始坐标来自哪个坐标系。</p>
+<p>若要把 $\{2\}$ 中的坐标转换到 $\{0\}$，并且中间经过 $\{1\}$，则：</p>
+<div class="math-block">$$
+T_0^2=T_0^1T_1^2.
+$$</div>
+<p>就可以把它理解成两步：</p>
+<ol><li>$T_1^2$：先把 $\{2\}$ 中的坐标转换到 $\{1\}$；</li><li>$T_0^1$：再把 $\{1\}$ 中的坐标转换到 $\{0\}$。</li></ol>
+<p>所以，<strong>先执行的变换写在右边，后执行的变换写在左边</strong>。矩阵的顺序不能随意交换。</p>
+<p>矩阵连乘来自代入：</p>
+<div class="math-block">$$
+\bar p_0=T_0^1\bar p_1=T_0^1(T_1^2\bar p_2)=(T_0^1T_1^2)\bar p_2.
+$$</div>
+<p>这和普通代数中的代入完全一样。若 $a=bx$、$b=cy$，那么 $a=b(cy)=(bc)y$；机械臂中只是把普通数字换成了变换矩阵,前面将旋转和平移归一到同一个矩阵当中的时候目的就是为了可以在此进行表达.简易点来说就是旋转平移矩阵变换到另一个位姿态的时候,要先进行旋转的统一之后加上平移量。</p>
+<p>对 $n$ 个串联关节：</p>
+<div class="math-block">$$
+T_0^n=T_0^1T_1^2\cdots T_{n-1}^n.
+$$</div>
+<p>机械臂是一节连杆接着一节连杆。每个关节只描述相邻两个坐标系之间的相对运动，所以要逐级变换，最后才能得到末端相对基座的整体位姿。</p>
+<h3 id="1-4-三维刚体位姿的最小表示">1.4 三维刚体位姿的最小表示</h3>
+<p>前面所处于的位姿都是在二维空间进行变换的,在二维描述一个刚体的时候需要两个位置量和一个旋转角.但是在三位中想要描述一个刚体的位姿,则需要三维的位置空间XYZ.和三个姿态量pitch,yaw,roll</p>
+<p>三维位置写成 $p\in\mathbb R^3$，姿态用旋转矩阵 $R\in SO(3)$ 表示：</p>
+<div class="math-block">$$
+SO(3)=\{R\in\mathbb R^{3\times3}\mid R^TR=I,\det R=1\}.
+$$</div>
+<p>其中 $R^TR=I$ 表示旋转后坐标轴仍然互相垂直且长度为 $1$；$\det R=1$ 表示它是正常旋转，而不是镜像翻转。虽然矩阵有 $9$ 个元素，但元素之间受约束，真正独立的姿态自由度只有 $3$。</p>
+<p>绕世界 $z$ 轴旋转：</p>
+<div class="math-block">$$
+R_z(\theta)=
+\begin{bmatrix}
+\cos\theta&amp;-\sin\theta&amp;0\\
+\sin\theta&amp;\cos\theta&amp;0\\
+0&amp;0&amp;1
+\end{bmatrix}.
+$$</div>
+<p>完整三维齐次变换为：</p>
+<div class="math-block">$$
+T=
+\begin{bmatrix}
+R&amp;p\\
+0_{1\times3}&amp;1
+\end{bmatrix}.
+$$</div>
+<p>三维和二维的逻辑完全相同：左上角的 $R$ 负责旋转，右上角的 $p$ 负责平移。只是二维使用 $2\times2$ 的旋转矩阵和 $3\times3$ 的齐次矩阵，三维使用 $3\times3$ 的旋转矩阵和 $4\times4$ 的齐次矩阵。</p>
+<p>综上，机械臂末端相对基座的三维位姿可以写成：</p>
+<div class="math-block">$$
+T_0^e=
+\begin{bmatrix}
+R_0^e&amp;p_0^e\\
+0_{1\times3}&amp;1
+\end{bmatrix}.
+$$</div>
+<p>其中 $p_0^e$ 是末端原点在基座坐标系中的位置，$R_0^e$ 是末端坐标轴相对基座坐标轴的方向。</p>
+<p>---</p>
+<h2 id="2-正运动学-forward-kinematics-fk">2. 正运动学（Forward Kinematics, FK）</h2>
+<p><strong>正运动学</strong>要解决的问题就很简单了,就是在已知每个关节的关节角度的情况下,去求机械臂末端的位置和姿态</p>
+<p>这里的正指的</p>
+<div class="math-block">$$
+\text{关节变量 }q
+\quad\Longrightarrow\quad
+\text{末端位置与姿态 }x_e
+$$</div>
+<p>所以 FK 的本质是一个函数：</p>
+<div class="math-block">$$
+x_e=f(q).
+$$</div>
+<p>我们先用一个很简单的二连杆模型进行理解,这个模型虽然很简单,但是其中的最重要的原理已经囊括其中：<strong>每一节连杆的位置，等于前一节末端位置加上本节连杆在世界坐标系中的位移。</strong> 其实结合上面的原理讲解,大致也能有理解这句话的含义了</p>
+<h3 id="2-1-二连杆末端位置的直接推导">2.1 二连杆末端位置的直接推导</h3>
+<p>假设第一关节位于坐标原点，第一根连杆长度为 $l_1$，第二根连杆长度为 $l_2$，关节角都逆时针为正。</p>
+<p>这里要特别注意：$q_2$ 表示第二根连杆相对第一根连杆的转角，而不是第二根连杆相对世界坐标系的绝对角。因此第二根连杆相对世界的方向是：</p>
+<div class="math-block">$$
+\theta_2=q_1+q_2.
+$$</div>
+<p>为什么是相加？因为第二根连杆先跟随第一根连杆整体转过 $q_1$，然后又相对第一根连杆转过 $q_2$。</p>
+<p>以及这里的世界的方向不要简单理解成宏观的世界了,最好是还是以besa_link为参考系进行观察.</p>
+<h4 id="2-1-1-一根连杆的坐标怎么得到">2.1.1 一根连杆的坐标怎么得到?</h4>
+<p>一根长度为 $l$、方向角为 $\theta$ 的杆，其水平投影和竖直投影分别是：</p>
+<div class="math-block">$$
+\text{水平投影}=l\cos\theta,
+\qquad
+\text{竖直投影}=l\sin\theta.
+$$</div>
+<p>用向量写就是：</p>
+<div class="math-block">$$
+\begin{bmatrix}x\\y\end{bmatrix}
+=
+\begin{bmatrix}l\cos\theta\\l\sin\theta\end{bmatrix}.
+$$</div>
+<p>所以，FK 中出现的 $\cos$ 和 $\sin$，本质上只是把一根有方向的连杆分解成水平和竖直两个分量。</p>
+<p>也就是使用两个向量描述一个主向量,这个主向量就是我们要求的杆长.</p>
+<p>第一根连杆末端的位置为：</p>
+<div class="math-block">$$
+p_1=
+\begin{bmatrix}
+l_1\cos q_1\\l_1\sin q_1
+\end{bmatrix}.
+$$</div>
+<p>这里的意思是:从基座出发，沿第一根连杆走 $l_1$。由于第一根连杆的方向角是 $q_1$，所以它在 $x$ 方向贡献 $l_1\cos q_1$，在 $y$ 方向贡献 $l_1\sin q_1$。</p>
+<p>第二根连杆在世界坐标系中的方向角为 $q_1+q_2$，故从第一关节到末端的位移为：</p>
+<div class="math-block">$$
+p_{2/1}=
+\begin{bmatrix}
+l_2\cos(q_1+q_2)\\l_2\sin(q_1+q_2)
+\end{bmatrix}.
+$$</div>
+<p>这里的 $p_{2/1}$ 可以读作“从第一个关节指向第二个关节的位移”。它不是末端的绝对位置，而只是第二根连杆贡献的那一段位移。</p>
+<p>由于第二根连杆相对世界的方向角是 $q_1+q_2$，它在两个坐标方向上的贡献分别是：</p>
+<div class="math-block">$$
+\begin{aligned}
+\text{$x$ 方向贡献}&amp;=l_2\cos(q_1+q_2),\\
+\text{$y$ 方向贡献}&amp;=l_2\sin(q_1+q_2).
+\end{aligned}
+$$</div>
+<p>向量相加：</p>
+<div class="math-block">$$
+p_e=p_1+p_{2/1}.
+$$</div>
+<p>这一步就是向量的“首尾相接”：先从基座走到第一个关节，再从第一个关节沿第二根连杆走到末端。两段位移相加，就得到基座到末端的总位移。</p>
+<p>于是末端位置：</p>
+<div class="math-block">$$
+\boxed{
+\begin{aligned}
+x&amp;=l_1\cos q_1+l_2\cos(q_1+q_2),\\
+y&amp;=l_1\sin q_1+l_2\sin(q_1+q_2).
+\end{aligned}}
+$$</div>
+<p>这两个式子就是二连杆机械臂的 FK 方程。给定 $q_1,q_2,l_1,l_2$ 后，代入公式即可得到末端的 $(x,y)$。</p>
+<p>例如当 $q_1=0,q_2=0$ 时，两根连杆完全沿 $x$ 轴伸直：</p>
+<div class="math-block">$$
+x=l_1+l_2,\qquad y=0.
+$$</div>
+<p>当 $q_1=\frac{\pi}{2},q_2=0$ 时，两根连杆完全沿 $y$ 轴伸直：</p>
+<div class="math-block">$$
+x=0,\qquad y=l_1+l_2.
+$$</div>
+<p>这两个特殊情况可以用来检查 FK 公式的方向和正负号是否正确。</p>
+<p>末端朝向为第二根连杆的绝对角：</p>
+<div class="math-block">$$
+\phi=q_1+q_2.
+$$</div>
+<p>因此平面完整末端位姿可以记为：</p>
+<div class="math-block">$$
+x_e=[x,y,\phi]^T=f(q).
+$$</div>
+<p>这里的 $x_e$ 不要和单独的坐标 $x$ 混淆。单独的 $x$ 是末端的水平位置；$x_e$ 是完整的末端状态，同时包含水平位置、竖直位置和末端方向：</p>
+<div class="math-block">$$
+x_e=
+\begin{bmatrix}
+\text{末端水平位置}\\
+\text{末端竖直位置}\\
+\text{末端方向角}
+\end{bmatrix}.
+$$</div>
+<h3 id="2-2-用变换矩阵重写-fk">2.2 用变换矩阵重写 FK</h3>
+<p>前面用三角函数直接写出了二连杆的坐标。现在换一种写法：不给每个坐标单独展开，而是给每一节连杆建立一个“局部变换矩阵”。</p>
+<p>这个矩阵表示两个连续动作：先绕当前关节旋转 $q_i$，再沿旋转后的新 $x$ 轴前进 $l_i$。</p>
+<p>定义“旋转 $q_i$，再沿新 $x$ 轴平移 $l_i$”的二维齐次变换：</p>
+<div class="math-block">$$
+A_i(q_i)=
+\begin{bmatrix}
+\cos q_i&amp;-\sin q_i&amp;l_i\cos q_i\\
+\sin q_i&amp; \cos q_i&amp;l_i\sin q_i\\
+0&amp;0&amp;1
+\end{bmatrix}.
+$$</div>
+<p>矩阵右上角的两项：</p>
+<div class="math-block">$$
+\begin{bmatrix}
+l_i\cos q_i\\l_i\sin q_i
+\end{bmatrix}
+$$</div>
+<p>正好就是长度为 $l_i$、方向角为 $q_i$ 的连杆位移。因此这个矩阵没有引入新的物理内容，只是把“旋转后的方向”和“沿该方向移动一段长度”打包起来。</p>
+<p>二连杆末端变换为：</p>
+<div class="math-block">$$
+T_0^e=A_1(q_1)A_2(q_2).
+$$</div>
+<p>矩阵乘法的顺序仍然遵循前面的规则：先执行的局部变换在右边，后执行的局部变换在左边。这里先应用 $A_2$，再应用 $A_1$，所以结果是 $A_1A_2$。</p>
+<p>矩阵相乘后，左上角给出末端姿态，右上角给出末端位置：</p>
+<div class="math-block">$$
+T_0^e=
+\begin{bmatrix}
+R_0^e&amp;p_0^e\\
+0&amp;1
+\end{bmatrix}.
+$$</div>
+<p>其中 $p_0^e=[x,y]^T$，而 $R_0^e$ 描述末端相对基座的旋转。</p>
+<p>将矩阵相乘后，右上角两项即为前节的 $x,y$ 公式。这给出多关节机械臂 FK 的一般结构：</p>
+<div class="math-block">$$
+T_0^e(q)=\prod_{i=1}^{n}A_i(q_i).
+$$</div>
+<p>因此，直接三角函数法和齐次变换法是同一件事的两种写法：三角函数法适合看清楚每一项从哪里来，齐次变换法适合把多节连杆统一组织起来。</p>
+<p>这里其实也并没有故弄玄虚,只要能理解这部分就是为了建立一个可以同时描述旋转和平移的矩阵就好,哪怕看不懂公式也要知道最基本的这里在做什么就好.</p>
+<h2 id="3-逆运动学-inverse-kinematics-ik">3. 逆运动学（Inverse Kinematics, IK）</h2>
+<p>正运动学是“已知关节角，求末端位置”。逆运动学正好反过来：</p>
+<blockquote>已知希望末端到达的位置，反过来求每个关节应该转到什么角度。</blockquote>
+<p>FK 写成：</p>
+<div class="math-block">$$
+x=f(q).
+$$</div>
+<p>IK 要解决的是：已知目标位置 $x$，求满足下面方程的 $q$：</p>
+<div class="math-block">$$
+f(q)=x.
+$$</div>
+<p>这里最容易产生一个误解：不能简单的理解成正解反过来进行解算就可以了.因为 FK 里通常有很多三角函数叠在一起，反解时可能出现无解、多个解，甚至无穷多个解。</p>
+<p>我们还是继续用二维二连杆。目标末端位置记为：</p>
+<div class="math-block">$$
+p_e=
+\begin{bmatrix}
+x\\y
+\end{bmatrix}.
+$$</div>
+<p>这是此时的末端位姿,然后我们的目的就是在这个位姿态的基础上运动到另外一个位姿 $$q1,q2$$</p>
+<h3 id="3-1-先看目标点是否在工作范围内">3.1 先看目标点是否在工作范围内</h3>
+<p>先不要急着求角度。把基座原点和目标点连起来，设这条线的长度为 $\rho$。根据勾股定理：</p>
+<div class="math-block">$$
+\rho=\sqrt{x^2+y^2}.
+$$</div>
+<p>现在把二连杆看成一个三角形：</p>
+<ul><li>第一根连杆是一条长度为 $l_1$ 的边；</li><li>第二根连杆是一条长度为 $l_2$ 的边；</li><li>基座到目标点的连线是一条长度为 $\rho$ 的边。</li></ul>
+<p>这个三角形能不能成立，决定 IK 有没有解。</p>
+<p>如果目标点太远，连杆够不着；如果目标点太近，而两根连杆又不能完全折叠，同样够不着。这就是 IK 的第一个问题：<strong>目标点是否几何可达。</strong></p>
+<h3 id="3-2-求第二个关节角-q-2">3.2 求第二个关节角 $q_2$</h3>
+<p>二连杆的三条边满足余弦定理：</p>
+<div class="math-block">$$
+\rho^2=l_1^2+l_2^2+2l_1l_2\cos q_2.
+$$</div>
+<p>这里使用的是相对关节角 $q_2$。它描述两根连杆之间的夹角关系。</p>
+<p>先移项：</p>
+<div class="math-block">$$
+2l_1l_2\cos q_2
+=
+\rho^2-l_1^2-l_2^2.
+$$</div>
+<p>再除以 $2l_1l_2$：</p>
+<div class="math-block">$$
+\cos q_2
+=
+\frac{\rho^2-l_1^2-l_2^2}{2l_1l_2}.
+$$</div>
+<p>因为 $\rho^2=x^2+y^2$，所以：</p>
+<div class="math-block">$$
+\boxed{
+\cos q_2=
+\frac{x^2+y^2-l_1^2-l_2^2}{2l_1l_2}}.
+$$</div>
+<p>为了让公式短一点，记：</p>
+<div class="math-block">$$
+c_2=
+\frac{x^2+y^2-l_1^2-l_2^2}{2l_1l_2}.
+$$</div>
+<p>于是：</p>
+<div class="math-block">$$
+\cos q_2=c_2.
+$$</div>
+<p>接下来由三角恒等式：</p>
+<div class="math-block">$$
+\sin^2q_2+\cos^2q_2=1
+$$</div>
+<p>得到：</p>
+<div class="math-block">$$
+\sin q_2=\pm\sqrt{1-c_2^2}.
+$$</div>
+<p>这里的正负号非常重要。因为对应两种不同的机械臂姿态：</p>
+<ul><li>$\sin q_2&gt;0$：肘部朝向一侧；</li><li>$\sin q_2&lt;0$：肘部朝向另一侧。</li></ul>
+<p>在图上看，就是同一个目标点，机械臂可以从目标点的上方绕过去，也可以从下方绕过去。两种姿态的末端位置相同，但关节角不同。</p>
+<p>因此用同时考虑正弦和余弦的函数表示：</p>
+<div class="math-block">$$
+\boxed{
+q_2=\operatorname{atan2}
+\left(\sin q_2,\cos q_2\right)}
+$$</div>
+<p>也就是：</p>
+<div class="math-block">$$
+\boxed{
+q_2=\operatorname{atan2}
+\left(\pm\sqrt{1-c_2^2},c_2\right)}.
+$$</div>
+<p>之所以使用 $\operatorname{atan2}$，而不直接使用 $\arccos$，是因为：</p>
+<div class="math-block">$$
+\arccos(c_2)
+$$</div>
+<p>只能根据余弦值给出一个主值，不能明确区分 $\sin q_2$ 的正负；而 $\operatorname{atan2}$ 同时接收正弦和余弦，因此可以保留角度所在的方向。</p>
+<h3 id="3-3-求第一个关节角-q-1">3.3 求第一个关节角 $q_1$</h3>
+<p>前面用三角形关系已经找到了第二关节角 $q_2$。这时两根杆之间“折成什么样”已经定下来了，剩下的问题是：整条手臂要朝哪个方向摆，才能让末端对准目标点？</p>
+<p>先简单理解一下：把第一根杆想象成暂时沿着水平 $x$ 轴放好，也就是先令 $q_1=0$。这只是在纸上方便看几何关系，真实机械臂的姿态还没改变。</p>
+<p>在这个临时姿态里：</p>
+<ul><li>第一根杆的位移是 $[l_1,0]^T$；</li><li>第二根杆相对第一根杆转过 $q_2$，位移是 $[l_2\cos q_2,l_2\sin q_2]^T$。</li></ul>
+<p>两段相加，末端向量为：</p>
+<div class="math-block">$$
+u(q_2)=
+\begin{bmatrix}
+l_1+l_2\cos q_2\\
+l_2\sin q_2
+\end{bmatrix}.
+$$</div>
+<p>这个向量已经包含两根杆的长度和它们之间的夹角。它的方向角记为 $\beta$：</p>
+<div class="math-block">$$
+\beta=
+\operatorname{atan2}
+\left(
+l_2\sin q_2,\,
+l_1+l_2\cos q_2
+\right).
+$$</div>
+<p>目标点相对基座的向量是：</p>
+<div class="math-block">$$
+p_d=
+\begin{bmatrix}
+x\\y
+\end{bmatrix}.
+$$</div>
+<p>从基座指向目标点的角度记为 $\alpha$：</p>
+<div class="math-block">$$
+\alpha=\operatorname{atan2}(y,x).
+$$</div>
+<p>现在把刚才那个“临时摆好的二连杆形状”整体绕基座转动 $q_1$。向量 $u$ 原本朝向 $\beta$，整体转过 $q_1$ 后就朝向 $\beta+q_1$。它要和目标方向 $\alpha$ 重合，所以：</p>
+<div class="math-block">$$
+\beta+q_1=\alpha.
+$$</div>
+<p>移项：</p>
+<div class="math-block">$$
+\boxed{
+q_1=
+\operatorname{atan2}(y,x)
+-
+\operatorname{atan2}
+\left(
+l_2\sin q_2,\,
+l_1+l_2\cos q_2
+\right)}.
+$$</div>
+<p>我会把这个式子读成两段角度相减：</p>
+<ul><li>先看“基座到目标”整体朝哪个方向；</li><li>再扣掉“二连杆自己折出来的偏角”；</li><li>剩下的角度就是第一关节需要转的角度。</li></ul>
+<h3 id="为什么这里用-operatorname-atan2">为什么这里用 $\operatorname{atan2}$</h3>
+<p>向量 $[x,y]^T$ 的方向可以从横坐标和纵坐标一起确定：</p>
+<div class="math-block">$$
+\alpha=\operatorname{atan2}(y,x).
+$$</div>
+<p>普通的 $\arctan(y/x)$ 只看斜率，容易把不同象限的向量弄混；当 $x=0$ 时还会遇到除零。记住 $\operatorname{atan2}$ 的输入顺序是“纵坐标、横坐标”：</p>
+<div class="math-block">$$
+\operatorname{atan2}(y,x).
+$$</div>
+<p>把 $c_2=\cos q_2$、$s_2=\sin q_2$ 代进去，刚才的结果也可以写成：</p>
+<div class="math-block">$$
+q_1=
+\operatorname{atan2}(y,x)
+-
+\operatorname{atan2}
+\left(
+l_2s_2,\,
+l_1+l_2c_2
+\right).
+$$</div>
+<h3 id="我拿-fk-回代检查一次">我拿 FK 回代检查一次</h3>
+<p>推逆解时，我习惯最后把结果放回正解里检查。二连杆 FK 是：</p>
+<div class="math-block">$$
+\begin{aligned}
+x&amp;=l_1\cos q_1+l_2\cos(q_1+q_2),\\
+y&amp;=l_1\sin q_1+l_2\sin(q_1+q_2).
+\end{aligned}
+$$</div>
+<p>用和角公式展开：</p>
+<div class="math-block">$$
+\begin{aligned}
+\cos(q_1+q_2)
+&amp;=\cos q_1\cos q_2-\sin q_1\sin q_2,\\
+\sin(q_1+q_2)
+&amp;=\sin q_1\cos q_2+\cos q_1\sin q_2.
+\end{aligned}
+$$</div>
+<p>代回去之后：</p>
+<div class="math-block">$$
+\begin{aligned}
+x
+&amp;=(l_1+l_2\cos q_2)\cos q_1
+-l_2\sin q_2\sin q_1,\\
+y
+&amp;=(l_1+l_2\cos q_2)\sin q_1
++l_2\sin q_2\cos q_1.
+\end{aligned}
+$$</div>
+<p>这就是把下面这个向量：</p>
+<div class="math-block">$$
+\begin{bmatrix}
+l_1+l_2\cos q_2\\
+l_2\sin q_2
+\end{bmatrix}
+$$</div>
+<p>整体旋转 $q_1$。和刚才先把第一根杆暂时放平、再把整个构型转向目标的想法完全对上。</p>
+<h3 id="3-4-二连杆-ik-我会按这个顺序算">3.4 二连杆 IK：我会按这个顺序算</h3>
+<p>给定目标点 $(x,y)$ 和两根杆的长度 $l_1,l_2$，先算第二关节，再算第一关节。</p>
+<p><strong>先算基座到目标点的距离：</strong></p>
+<div class="math-block">$$
+\rho=\sqrt{x^2+y^2}.
+$$</div>
+<p><strong>再从余弦定理算 $q_2$ 的余弦：</strong></p>
+<div class="math-block">$$
+c_2=
+\frac{x^2+y^2-l_1^2-l_2^2}{2l_1l_2}.
+$$</div>
+<p><strong>接着选一个肘部方向：</strong></p>
+<div class="math-block">$$
+s_2=
++\sqrt{1-c_2^2}
+\qquad\text{或}\qquad
+s_2=
+-\sqrt{1-c_2^2}.
+$$</div>
+<p>正负号代表两种构型。可以把基座和目标点连成一条线，肘关节通常能落在这条线的两侧。选一个符号，就相当于选其中一侧。</p>
+<p><strong>有了正弦和余弦，就能用 $\operatorname{atan2}$ 找 $q_2$：</strong></p>
+<div class="math-block">$$
+q_2=\operatorname{atan2}(s_2,c_2).
+$$</div>
+<p><strong>最后求 $q_1$：</strong></p>
+<div class="math-block">$$
+q_1=
+\operatorname{atan2}(y,x)
+-
+\operatorname{atan2}
+\left(
+l_2s_2,\,
+l_1+l_2c_2
+\right).
+$$</div>
+<p>正负号各算一次，得到两组候选角度：</p>
+<div class="math-block">$$
+q^{(\sigma)}=
+\begin{bmatrix}
+q_1^{(\sigma)}\\
+q_2^{(\sigma)}
+\end{bmatrix},
+\qquad
+\sigma\in\{+1,-1\}.
+$$</div>
+<p>我记这个顺序只用一句话：<strong>先定目标距离，用余弦定形状，选肘部，再求整体朝向。</strong></p>
+<h3 id="3-5-手算一个目标点-看看两组解怎么来">3.5 手算一个目标点，看看两组解怎么来</h3>
+<p>令两根杆长度都是 1，目标点在 $(1,1)$：</p>
+<div class="math-block">$$
+l_1=l_2=1,
+\qquad
+p_d=
+\begin{bmatrix}
+1\\1
+\end{bmatrix}.
+$$</div>
+<p>目标距离：</p>
+<div class="math-block">$$
+\rho=\sqrt{1^2+1^2}=\sqrt{2}.
+$$</div>
+<p>代入 $c_2$：</p>
+<div class="math-block">$$
+c_2=
+\frac{1^2+1^2-1^2-1^2}{2\cdot1\cdot1}=0.
+$$</div>
+<p>所以：</p>
+<div class="math-block">$$
+s_2=\pm\sqrt{1-0^2}=\pm1.
+$$</div>
+<h4 id="先取-s-2-1">先取 $s_2=+1$</h4>
+<div class="math-block">$$
+q_2=\operatorname{atan2}(1,0)=\frac{\pi}{2}.
+$$</div>
+<p>再算 $q_1$：</p>
+<div class="math-block">$$
+\begin{aligned}
+q_1
+&amp;=\operatorname{atan2}(1,1)-\operatorname{atan2}(1,1)\\
+&amp;=0.
+\end{aligned}
+$$</div>
+<p>所以第一组是：</p>
+<div class="math-block">$$
+q_1=0,
+\qquad
+q_2=\frac{\pi}{2}.
+$$</div>
+<p>放回 FK：</p>
+<div class="math-block">$$
+\begin{aligned}
+x&amp;=\cos 0+\cos\frac{\pi}{2}=1,\\
+y&amp;=\sin 0+\sin\frac{\pi}{2}=1.
+\end{aligned}
+$$</div>
+<p>确实到达 $(1,1)$。</p>
+<h4 id="再取-s-2-1">再取 $s_2=-1$</h4>
+<div class="math-block">$$
+q_2=\operatorname{atan2}(-1,0)=-\frac{\pi}{2}.
+$$</div>
+<p>再算 $q_1$：</p>
+<div class="math-block">$$
+\begin{aligned}
+q_1
+&amp;=\operatorname{atan2}(1,1)-\operatorname{atan2}(-1,1)\\
+&amp;=\frac{\pi}{4}-\left(-\frac{\pi}{4}\right)\\
+&amp;=\frac{\pi}{2}.
+\end{aligned}
+$$</div>
+<p>所以第二组是：</p>
+<div class="math-block">$$
+q_1=\frac{\pi}{2},
+\qquad
+q_2=-\frac{\pi}{2}.
+$$</div>
+<p>代回 FK：</p>
+<div class="math-block">$$
+\begin{aligned}
+x&amp;=\cos\frac{\pi}{2}+\cos 0=1,\\
+y&amp;=\sin\frac{\pi}{2}+\sin 0=1.
+\end{aligned}
+$$</div>
+<p>两组关节角都把末端带到 $(1,1)$，只是肘关节落在目标连线的不同侧。这个例子也顺手检查了前面推导的两个分支。</p>
+<h3 id="3-6-目标点能不能到-从-c-2-的范围看">3.6 目标点能不能到：从 $c_2$ 的范围看</h3>
+<p>前面算出：</p>
+<div class="math-block">$$
+s_2=\pm\sqrt{1-c_2^2}.
+$$</div>
+<p>根号里面不能小于零，所以：</p>
+<div class="math-block">$$
+1-c_2^2\ge0,
+$$</div>
+<p>也就是：</p>
+<div class="math-block">$$
+-1\le c_2\le1.
+$$</div>
+<p>把 $c_2$ 的表达式代入：</p>
+<div class="math-block">$$
+-1
+\le
+\frac{\rho^2-l_1^2-l_2^2}{2l_1l_2}
+\le
+1.
+$$</div>
+<p>两根杆长度为正，所以可以乘以 $2l_1l_2$：</p>
+<div class="math-block">$$
+-2l_1l_2
+\le
+\rho^2-l_1^2-l_2^2
+\le
+2l_1l_2.
+$$</div>
+<p>两边加上 $l_1^2+l_2^2$：</p>
+<div class="math-block">$$
+l_1^2+l_2^2-2l_1l_2
+\le
+\rho^2
+\le
+l_1^2+l_2^2+2l_1l_2.
+$$</div>
+<p>左右分别配成平方：</p>
+<div class="math-block">$$
+(l_1-l_2)^2
+\le
+\rho^2
+\le
+(l_1+l_2)^2.
+$$</div>
+<p>距离 $\rho$ 不会小于零，开平方后：</p>
+<div class="math-block">$$
+\boxed{
+|l_1-l_2|
+\le
+\sqrt{x^2+y^2}
+\le
+l_1+l_2}.
+$$</div>
+<p>其实这条不等式可以直接用手臂想出来：</p>
+<ul><li>两根杆拉成一条直线，够到最远处，距离是 $l_1+l_2$；</li><li>两根杆尽量往回折，最靠近基座的距离是 $|l_1-l_2|$。</li></ul>
+<p>所以如果目标距离大于两根杆总长，手臂够不到；如果两根杆长度不一样，目标也不能落在比长度差更小的圆里面。</p>
+<p>在边界上：</p>
+<div class="math-block">$$
+\rho=l_1+l_2
+\quad\Longrightarrow\quad
+q_2=0\pmod{2\pi},
+$$</div>
+<p>两根杆同向伸直。</p>
+<div class="math-block">$$
+\rho=|l_1-l_2|
+\quad\Longrightarrow\quad
+q_2=\pi\pmod{2\pi},
+$$</div>
+<p>两根杆方向相反，处于最折叠的边界。</p>
+<p>有个特殊点要单独记：如果 $l_1=l_2$，目标又在基座原点，两根杆可以首尾抵消。此时改变 $q_1$，末端仍然停在原点，所以位置本身无法告诉我 $q_1$ 是多少。公式里的 $\operatorname{atan2}(0,0)$ 没有确定方向，正好对应这个几何事实。</p>
+<h3 id="3-7-为什么一个位置会有多组关节角">3.7 为什么一个位置会有多组关节角</h3>
+<p>工作空间内部通常有：</p>
+<div class="math-block">$$
+-1&lt;c_2&lt;1.
+$$</div>
+<p>于是 $s_2$ 有正、负两个取值：</p>
+<div class="math-block">$$
+s_2=+\sqrt{1-c_2^2}
+\qquad\text{或}\qquad
+s_2=-\sqrt{1-c_2^2}.
+$$</div>
+<p>把它们分别代回 $q_2$ 和 $q_1$，就得到两种肘部构型。想象基座和目标点之间拉一根线，肘关节可以在这条线的一边，也可以在另一边。</p>
+<p>此外，转角还可以加整圈：</p>
+<div class="math-block">$$
+q_i
+\quad\text{和}\quad
+q_i+2k\pi,
+\qquad k\in\mathbb Z,
+$$</div>
+<p>从几何方向上看代表同一个朝向。真实机械臂的关节有限位，所以最后还要检查候选角度能不能落在允许范围。</p>
+<p>还有一个我容易混淆的地方：上面解的是末端<strong>位置</strong> $(x,y)$。如果任务还要求末端必须朝某个方向，就多了一个条件：</p>
+<div class="math-block">$$
+\phi=q_1+q_2.
+$$</div>
+<p>平面二连杆只有两个关节变量，却要指定 $x,y,\phi$ 三个量。一般给定位置后，末端方向由选中的那组关节角一起决定，不能再随意指定一个独立方向。自由度更多的机械臂才可能同时满足位置、方向以及其他约束。</p>
+<p>算出候选解后，我还要挨个检查：角度是否超限、连杆会不会碰撞、构型是否适合当前动作、从现在的位置能不能连续走过去。公式给出的候选值只是几何解，最后还要看机械臂本身的限制。</p>
+<h3 id="3-8-多关节时-在当前姿态附近一点点修">3.8 多关节时：在当前姿态附近一点点修</h3>
+<p>二连杆的几何解比较干净。关节数增加后，解析公式会很长，甚至不容易直接解出来。这时先不要求一口气走到目标，可以只看当前姿态附近的一小步。</p>
+<p>设末端任务变量和关节变量的关系为：</p>
+<div class="math-block">$$
+x=f(q),
+\qquad
+q\in\mathbb R^n,
+\qquad
+x\in\mathbb R^m.
+$$</div>
+<p>所以这里的雅可比尺寸是 $m\times n$：$m$ 行对应末端任务量，$n$ 列对应关节。先把这个尺寸记住，后面判断能不能求逆时会用到。</p>
+<p>让关节从 $q$ 变成 $q+\Delta q$。在当前位置附近做一阶泰勒展开：</p>
+<div class="math-block">$$
+f(q+\Delta q)
+\approx
+f(q)+J(q)\Delta q.
+$$</div>
+<p>如果把被省略的小量也写出来，就是：</p>
+<div class="math-block">$$
+f(q+\Delta q)
+=
+f(q)+J(q)\Delta q+O(\|\Delta q\|^2).
+$$</div>
+<p>最后的 $O(\|\Delta q\|^2)$ 表示跟关节变化量的平方同阶的小量。步子越小，这部分相对越不显眼；步子很大时，局部直线近似就可能偏得比较多。</p>
+<p>这里先把高阶小量放一边，就得到：</p>
+<div class="math-block">$$
+\Delta x\approx J(q)\Delta q,
+\qquad
+J(q)=\frac{\partial f}{\partial q}.
+$$</div>
+<p>这句话可以理解成：在当前姿态附近，雅可比告诉我每个关节稍微动一点，末端会往哪边走、走多少。</p>
+<p>如果 $J$ 是方阵而且可逆：</p>
+<div class="math-block">$$
+\Delta q\approx J^{-1}(q)\Delta x.
+$$</div>
+<p>如果自由度多于任务维数，也就是 $n&gt;m$，同一个末端小位移可能有多组关节变化。常用伪逆取一个关节变化量较小的解：</p>
+<div class="math-block">$$
+\Delta q\approx J^+(q)\Delta x.
+$$</div>
+<p>当 $J$ 行满秩时，伪逆可以写成：</p>
+<div class="math-block">$$
+J^+=J^T(JJ^T)^{-1}.
+$$</div>
+<p>这个逆矩阵要求 $JJ^T$ 可逆；如果姿态靠近奇异位形，它会变得不好求，算出来的关节变化也可能很大。</p>
+<p>当 $J$ 行满秩时：</p>
+<div class="math-block">$$
+J^+=J^T(JJ^T)^{-1}.
+$$</div>
+<p>冗余机械臂还可以在这个解上加一项零空间运动：</p>
+<div class="math-block">$$
+\Delta q
+=
+J^+\Delta x+
+(I-J^+J)z.
+$$</div>
+<p>看它对末端产生的影响：</p>
+<div class="math-block">$$
+J(I-J^+J)z
+=
+(J-JJ^+J)z
+=0.
+$$</div>
+<p>所以第二项在一阶近似下不会改变目标末端位移，可以用来调整肘部、避开限位等。记忆时我会说：<strong>第一项负责把末端往目标推，第二项在不动末端的前提下摆内部姿势。</strong></p>
+<p>如果目标是 $x_d$，当前关节状态是 $q^{(k)}$，当前误差为：</p>
+<div class="math-block">$$
+e^{(k)}=x_d-f(q^{(k)}).
+$$</div>
+<p>就可以按小步更新：</p>
+<div class="math-block">$$
+q^{(k+1)}
+=
+q^{(k)}
++
+\eta J^+(q^{(k)})e^{(k)},
+\qquad
+0&lt;\eta\le1.
+$$</div>
+<p>$\eta$ 是步长。太大时可能跨过合适区域，太小时则要走很多步。走完一步以后姿态变了，雅可比也变了，所以再用新姿态重新算。</p>
+<p>这套局部方法还有两个需要留意的地方：</p>
+<ul><li>靠近奇异位形时，伪逆可能给出很大的关节变化；</li><li>如果任务里有末端方向，方向误差要用合适的角度差表示，不能直接把两个跨过 $\pi$ 的角度做普通相减。</li></ul>
+<p>---</p>
+<h1 id="第三部分-微分运动学-速度-力与奇异性">第三部分：微分运动学——速度、力与奇异性</h1>
+<h2 id="4-雅可比矩阵-关节的小动作怎样传到末端">4. 雅可比矩阵：关节的小动作怎样传到末端</h2>
+<p>我把雅可比先当成一张“当前姿态下的换算表”：</p>
+<div class="math-block">$$
+\text{关节小变化}
+\quad\longrightarrow\quad
+\text{末端小变化}.
+$$</div>
+<p>它只描述当前位置附近的关系。机械臂姿态换了，这张表通常也要跟着换。</p>
+<h3 id="4-1-从一个转动杆开始">4.1 从一个转动杆开始</h3>
+<p>长度为 $l$ 的杆，关节角为 $q$，末端位置：</p>
+<div class="math-block">$$
+p(q)=
+\begin{bmatrix}
+l\cos q\\
+l\sin q
+\end{bmatrix}.
+$$</div>
+<p>角度稍微变化 $\mathrm dq$，位置的变化近似为：</p>
+<div class="math-block">$$
+\mathrm dp=\frac{\partial p}{\partial q}\mathrm dq.
+$$</div>
+<p>对 $q$ 求导：</p>
+<div class="math-block">$$
+\frac{\partial p}{\partial q}
+=
+\begin{bmatrix}
+-l\sin q\\
+l\cos q
+\end{bmatrix}.
+$$</div>
+<p>这个向量跟杆垂直，正好是圆周切线方向。也就是说，转动关节的小幅运动会让末端沿着圆弧切线走。</p>
+<p>如果把 $\mathrm dq$ 除以时间，就得到：</p>
+<div class="math-block">$$
+\dot p=
+\frac{\partial p}{\partial q}\dot q.
+$$</div>
+<p>二连杆只是多了一个关节：每个关节各自对末端速度贡献一项，再把这些贡献相加。</p>
+<h3 id="4-2-从-fk-对时间求导">4.2 从 FK 对时间求导</h3>
+<p>二连杆位置写成：</p>
+<div class="math-block">$$
+p=
+\begin{bmatrix}
+x\\y
+\end{bmatrix}
+=f(q).
+$$</div>
+<p>链式法则告诉我：</p>
+<div class="math-block">$$
+\dot x
+=
+\frac{\partial x}{\partial q_1}\dot q_1
++
+\frac{\partial x}{\partial q_2}\dot q_2,
+$$</div>
+<div class="math-block">$$
+\dot y
+=
+\frac{\partial y}{\partial q_1}\dot q_1
++
+\frac{\partial y}{\partial q_2}\dot q_2.
+$$</div>
+<p>把偏导数排成矩阵，就定义出位置雅可比：</p>
+<div class="math-block">$$
+J_p(q)=
+\begin{bmatrix}
+\dfrac{\partial x}{\partial q_1}&amp;
+\dfrac{\partial x}{\partial q_2}\\[6pt]
+\dfrac{\partial y}{\partial q_1}&amp;
+\dfrac{\partial y}{\partial q_2}
+\end{bmatrix}.
+$$</div>
+<p>所以：</p>
+<div class="math-block">$$
+\boxed{
+\begin{bmatrix}
+\dot x\\
+\dot y
+\end{bmatrix}
+=
+J_p(q)
+\begin{bmatrix}
+\dot q_1\\
+\dot q_2
+\end{bmatrix}}.
+$$</div>
+<p>我看雅可比的一列时，会想象只动一个关节：</p>
+<ul><li>第一列：先让 $q_1$ 动一点，其他关节停住，看末端怎么走；</li><li>第二列：让 $q_2$ 动一点，看末端怎么走。</li></ul>
+<p>列向量记录的就是这个关节单独运动时，末端瞬时速度的方向和大小。</p>
+<h3 id="4-3-二连杆位置雅可比-逐项求偏导">4.3 二连杆位置雅可比：逐项求偏导</h3>
+<p>二连杆 FK：</p>
+<div class="math-block">$$
+\begin{aligned}
+x&amp;=l_1\cos q_1+l_2\cos(q_1+q_2),\\
+y&amp;=l_1\sin q_1+l_2\sin(q_1+q_2).
+\end{aligned}
+$$</div>
+<p>为了不反复抄很长的角度，记：</p>
+<div class="math-block">$$
+s_1=\sin q_1,\qquad c_1=\cos q_1,
+$$</div>
+<div class="math-block">$$
+s_{12}=\sin(q_1+q_2),\qquad
+c_{12}=\cos(q_1+q_2).
+$$</div>
+<p>先对水平位置 $x$ 求偏导：</p>
+<div class="math-block">$$
+\frac{\partial x}{\partial q_1}
+=
+-l_1s_1-l_2s_{12},
+$$</div>
+<div class="math-block">$$
+\frac{\partial x}{\partial q_2}
+=
+-l_2s_{12}.
+$$</div>
+<p>为什么两项不一样？$q_1$ 一动，两根杆的绝对方向都跟着变；$q_2$ 一动，第一根杆方向不变，只有第二根杆跟着变。</p>
+<p>再对竖直位置 $y$ 求偏导：</p>
+<div class="math-block">$$
+\frac{\partial y}{\partial q_1}
+=
+l_1c_1+l_2c_{12},
+$$</div>
+<div class="math-block">$$
+\frac{\partial y}{\partial q_2}
+=
+l_2c_{12}.
+$$</div>
+<p>把四个偏导按“第一行对应 $x$、第二行对应 $y$”放进去：</p>
+<div class="math-block">$$
+\boxed{
+J_p(q)=
+\begin{bmatrix}
+-l_1s_1-l_2s_{12}&amp;-l_2s_{12}\\
+l_1c_1+l_2c_{12}&amp;l_2c_{12}
+\end{bmatrix}}.
+$$</div>
+<p>把它乘以关节速度，展开后就是：</p>
+<div class="math-block">$$
+\begin{bmatrix}
+\dot x\\
+\dot y
+\end{bmatrix}
+=
+\begin{bmatrix}
+-l_1s_1-l_2s_{12}&amp;-l_2s_{12}\\
+l_1c_1+l_2c_{12}&amp;l_2c_{12}
+\end{bmatrix}
+\begin{bmatrix}
+\dot q_1\\
+\dot q_2
+\end{bmatrix}.
+$$</div>
+<p>我用两条来记这个矩阵：</p>
+<ul><li>第一列能看到两根杆，因为第一关节带着后面整条手臂一起转；</li><li>第二列只跟第二根杆有关，因为它只直接改变第二根杆的方向。</li></ul>
+<h3 id="4-3-1-把机械臂伸直检查一下">4.3.1 把机械臂伸直检查一下</h3>
+<p>令：</p>
+<div class="math-block">$$
+q_1=0,\qquad q_2=0.
+$$</div>
+<p>两根杆沿 $x$ 轴伸直，所以：</p>
+<div class="math-block">$$
+s_1=s_{12}=0,
+\qquad
+c_1=c_{12}=1.
+$$</div>
+<p>代入：</p>
+<div class="math-block">$$
+J_p=
+\begin{bmatrix}
+0&amp;0\\
+l_1+l_2&amp;l_2
+\end{bmatrix}.
+$$</div>
+<p>于是：</p>
+<div class="math-block">$$
+\dot x=0,
+\qquad
+\dot y=(l_1+l_2)\dot q_1+l_2\dot q_2.
+$$</div>
+<p>末端的一阶速度只有竖直分量。想象一根水平伸直的手臂，关节刚开始转时，末端先沿竖直切线方向动；水平方向要到更高阶的变化才显出来。这个姿态刚好也会在后面看到雅可比退化。</p>
+<h3 id="4-4-如果任务还要控制末端方向">4.4 如果任务还要控制末端方向</h3>
+<p>第二根杆的绝对方向：</p>
+<div class="math-block">$$
+\phi=q_1+q_2.
+$$</div>
+<p>因此角速度：</p>
+<div class="math-block">$$
+\dot\phi=\dot q_1+\dot q_2.
+$$</div>
+<p>把位置和方向一起写：</p>
+<div class="math-block">$$
+x_e=
+\begin{bmatrix}
+x\\y\\\phi
+\end{bmatrix},
+\qquad
+\dot x_e=
+\begin{bmatrix}
+\dot x\\\dot y\\\dot\phi
+\end{bmatrix}.
+$$</div>
+<p>对应的平面位姿雅可比：</p>
+<div class="math-block">$$
+\boxed{
+\dot x_e=J_e(q)\dot q,
+\qquad
+J_e(q)=
+\begin{bmatrix}
+-l_1s_1-l_2s_{12}&amp;-l_2s_{12}\\
+l_1c_1+l_2c_{12}&amp;l_2c_{12}\\
+1&amp;1
+\end{bmatrix}}.
+$$</div>
+<p>这里矩阵是 $3\times2$：末端任务里有 $x,y,\phi$ 三个量，关节只有两个。三个末端速度不能任意独立指定，机械臂能实现的速度必须符合自身的几何约束。</p>
+<h3 id="4-5-推到三维-一列一列看关节的作用">4.5 推到三维：一列一列看关节的作用</h3>
+<p>三维末端速度通常把线速度和角速度堆在一起：</p>
+<div class="math-block">$$
+\begin{bmatrix}
+v_e\\
+\omega_e
+\end{bmatrix}
+=
+J(q)\dot q,
+\qquad
+J(q)\in\mathbb R^{6\times n}.
+$$</div>
+<p>上面三行是线速度，下面三行是角速度。这里约定所有向量都用同一个坐标系表达，下面先用基座坐标系。</p>
+<p>后面若把任务量 $x$ 写成“位置加欧拉角”，要记得欧拉角变化率和这里的 $\omega_e$ 需要通过姿态相关的映射转换。算雅可比时，我要先确认自己用的是角速度向量，还是某种姿态参数的导数，不能把两种量直接当成同一个东西。</p>
+<p>这里有个我容易混的地方：下半部分的 $\omega_e$ 是角速度向量。如果把末端姿态写成欧拉角，欧拉角的变化率通常不能直接当成这个角速度向量。使用哪种姿态表示，雅可比就要和那种表示配套。</p>
+<p>设第 $i$ 个转动关节：</p>
+<ul><li>转轴方向的单位向量是 $z_i$；</li><li>转轴上任取一点是 $o_i$；</li><li>末端位置是 $p_e$。</li></ul>
+<p>从转轴上的点到末端的向量为：</p>
+<div class="math-block">$$
+r_i=p_e-o_i.
+$$</div>
+<p>关节转过很小的角度 $\mathrm dq_i$，可以把这次小转动看作角位移向量 $z_i\mathrm dq_i$。刚体小转动引起的点位移为“角位移向量叉乘位置向量”：</p>
+<div class="math-block">$$
+\mathrm dp_e
+=
+(z_i\mathrm dq_i)\times r_i.
+$$</div>
+<p>把 $\mathrm dq_i$ 提出来：</p>
+<div class="math-block">$$
+\mathrm dp_e
+=
+\left[z_i\times(p_e-o_i)\right]\mathrm dq_i.
+$$</div>
+<p>所以这个关节对末端线速度的贡献是：</p>
+<div class="math-block">$$
+v_i=
+\left[z_i\times(p_e-o_i)\right]\dot q_i.
+$$</div>
+<p>同时，关节自身的角速度贡献沿着转轴：</p>
+<div class="math-block">$$
+\omega_i=z_i\dot q_i.
+$$</div>
+<p>把线速度和角速度放成雅可比的第 $i$ 列：</p>
+<div class="math-block">$$
+\boxed{
+J_i=
+\begin{bmatrix}
+z_i\times(p_e-o_i)\\
+z_i
+\end{bmatrix}}
+\qquad\text{（转动关节）}.
+$$</div>
+<p>如果第 $i$ 个关节是移动关节，它沿 $z_i$ 方向平移，末端线速度也沿这个方向变化，姿态不因此转动：</p>
+<div class="math-block">$$
+\boxed{
+J_i=
+\begin{bmatrix}
+z_i\\
+0
+\end{bmatrix}}
+\qquad\text{（移动关节）}.
+$$</div>
+<p>把每个关节的列排在一起：</p>
+<div class="math-block">$$
+J=
+\begin{bmatrix}
+J_1&amp;J_2&amp;\cdots&amp;J_n
+\end{bmatrix}.
+$$</div>
+<p>我会把三维雅可比的构造记成：<strong>一列对应一个关节，列里上半写它带来的线速度，下半写它带来的角速度。</strong></p>
+<p>---</p>
+<h2 id="5-由雅可比得到加速度">5. 由雅可比得到加速度</h2>
+<p>上一节有：</p>
+<div class="math-block">$$
+\dot x=J(q)\dot q.
+$$</div>
+<p>这句我会读成：当前姿态下，关节速度经过 $J$ 换算成末端速度。要算加速度，就对两边再求一次时间导数。</p>
+<h3 id="5-1-乘积法则带出两项">5.1 乘积法则带出两项</h3>
+<p>右边有两个会随时间变化的量：$J(q)$ 和 $\dot q$。所以：</p>
+<div class="math-block">$$
+\begin{aligned}
+\ddot x
+&amp;=
+\frac{d}{dt}\left[J(q)\dot q\right]\\
+&amp;=
+\frac{dJ}{dt}\dot q
++
+J(q)\frac{d\dot q}{dt}.
+\end{aligned}
+$$</div>
+<p>记住：</p>
+<div class="math-block">$$
+\dot J=\frac{dJ}{dt},
+\qquad
+\ddot q=\frac{d\dot q}{dt},
+$$</div>
+<p>就得到：</p>
+<div class="math-block">$$
+\boxed{
+\ddot x
+=
+J(q)\ddot q+
+\dot J(q,\dot q)\dot q}.
+$$</div>
+<p>我把两项分开记：</p>
+<div class="math-block">$$
+\underbrace{J(q)\ddot q}_{\text{关节自己在加速}}
++
+\underbrace{\dot J(q,\dot q)\dot q}_{\text{姿态变化，速度映射也在变化}}.
+$$</div>
+<p>第二项其实可以这样想：手臂在转，末端速度的方向也跟着转。哪怕速度大小不变，只要方向持续改变，末端就有加速度。这个方向变化的影响记在 $\dot J\dot q$ 里。</p>
+<h3 id="5-2-dot-j-为什么会出现">5.2 $\dot J$ 为什么会出现</h3>
+<p>雅可比依赖关节角，而关节角随时间变化。因此用链式法则：</p>
+<div class="math-block">$$
+\dot J
+=
+\sum_{i=1}^{n}
+\frac{\partial J}{\partial q_i}\dot q_i.
+$$</div>
+<p>每一项表示：第 $i$ 个关节转动时，雅可比跟着改变多少。把所有关节造成的变化加起来，就得到总的 $\dot J$。</p>
+<p>如果机械臂保持一个姿态不动，$J$ 不随时间变，$\dot J=0$。机械臂正在运动时，通常要把这一项一起算上。</p>
+<h3 id="5-3-用一根杆检查这个结果">5.3 用一根杆检查这个结果</h3>
+<p>一根长度为 $l$ 的杆，末端位置：</p>
+<div class="math-block">$$
+p(q)=
+\begin{bmatrix}
+l\cos q\\
+l\sin q
+\end{bmatrix}.
+$$</div>
+<p>它的位置雅可比：</p>
+<div class="math-block">$$
+J(q)=
+\frac{\partial p}{\partial q}
+=
+\begin{bmatrix}
+-l\sin q\\
+l\cos q
+\end{bmatrix}.
+$$</div>
+<p>速度：</p>
+<div class="math-block">$$
+\dot p=J(q)\dot q
+=
+\begin{bmatrix}
+-l\sin q\\
+l\cos q
+\end{bmatrix}\dot q.
+$$</div>
+<p>现在对 $J$ 本身求导：</p>
+<div class="math-block">$$
+\dot J
+=
+\begin{bmatrix}
+-l\cos q\\
+-l\sin q
+\end{bmatrix}\dot q.
+$$</div>
+<p>所以加速度：</p>
+<div class="math-block">$$
+\begin{aligned}
+\ddot p
+&amp;=J(q)\ddot q+\dot J\dot q\\
+&amp;=
+\begin{bmatrix}
+-l\sin q\\
+l\cos q
+\end{bmatrix}\ddot q
++
+\begin{bmatrix}
+-l\cos q\\
+-l\sin q
+\end{bmatrix}\dot q^2.
+\end{aligned}
+$$</div>
+<p>第一项跟角加速度有关；第二项跟角速度平方有关，方向指向圆心。就算 $\ddot q=0$，只要杆还在转，末端仍有向心加速度。</p>
+<p>我记这一节的重点只要一句：<strong>末端加速度要同时考虑关节加速度，以及关节运动导致雅可比变化的影响。</strong></p>
+<p>---</p>
+<h2 id="6-末端的力怎样变成关节力矩">6. 末端的力怎样变成关节力矩</h2>
+<p>上一节的雅可比把关节速度换成末端速度。现在反过来问：末端受到一个力，各个关节要承担多少力矩？</p>
+<p>我用“功”来推这件事，因为功可以把末端和关节两边放进同一条等式里。</p>
+<p>末端受到力 $F$，发生一个很小的位移 $\delta x$，外力做功：</p>
+<div class="math-block">$$
+\delta W_{\mathrm{ext}}=F^T\delta x.
+$$</div>
+<p>关节力矩为 $\tau$，关节发生很小的角度变化 $\delta q$，关节力矩做功：</p>
+<div class="math-block">$$
+\delta W_{\mathrm{joint}}=\tau^T\delta q.
+$$</div>
+<p>这里的 $\delta$ 可以先理解成“任意一个足够小的变化”。根据雅可比的微分关系：</p>
+<div class="math-block">$$
+\delta x=J\delta q.
+$$</div>
+<p>把这个关系塞进末端做功的式子：</p>
+<div class="math-block">$$
+\delta W_{\mathrm{ext}}
+=
+F^TJ\delta q.
+$$</div>
+<p>对于理想刚性机构，同一个微小运动从末端看、从关节看，功要对得上：</p>
+<div class="math-block">$$
+\tau^T\delta q=F^TJ\delta q.
+$$</div>
+<p>两边都有 $\delta q$。由于关节微小变化可以任意选，前面的系数必须相同：</p>
+<div class="math-block">$$
+\tau^T=F^TJ.
+$$</div>
+<p>转置后得到：</p>
+<div class="math-block">$$
+\boxed{\tau=J^TF}.
+$$</div>
+<h3 id="我怎么记这个转置">我怎么记这个转置</h3>
+<p>速度方向是：</p>
+<div class="math-block">$$
+\dot q
+\overset{J}{\longrightarrow}
+\dot x.
+$$</div>
+<p>力的方向则是：</p>
+<div class="math-block">$$
+F
+\overset{J^T}{\longrightarrow}
+\tau.
+$$</div>
+<p>更稳妥的记忆方式是从功率检查：</p>
+<div class="math-block">$$
+F^T\dot x
+=
+F^TJ\dot q
+=
+(J^TF)^T\dot q.
+$$</div>
+<p>末端功率和关节功率相等时，关节力矩只能是 $J^TF$。</p>
+<p>这里的正负号取决于 $F$ 的定义。如果 $F$ 表示环境施加在机械臂末端的力，那么它对机械臂的等效广义力为 $J^TF$；如果我们要求执行器去抵抗这个外力，静态平衡时执行器力矩方向相反。</p>
+<p>---</p>
+<h2 id="7-奇异位形-机械臂有些方向突然-不好动">7. 奇异位形：机械臂有些方向突然“不好动”</h2>
+<p>我先把奇异位形记成一句话：<strong>机械臂的几何姿态让某些关节运动方向变得重复，末端可实现的瞬时运动方向少了。</strong></p>
+<p>拿二连杆位置雅可比来检查：</p>
+<div class="math-block">$$
+J_p=
+\begin{bmatrix}
+-l_1s_1-l_2s_{12}&amp;-l_2s_{12}\\
+l_1c_1+l_2c_{12}&amp;l_2c_{12}
+\end{bmatrix},
+$$</div>
+<p>其中：</p>
+<div class="math-block">$$
+s_1=\sin q_1,\quad c_1=\cos q_1,
+$$</div>
+<div class="math-block">$$
+s_{12}=\sin(q_1+q_2),\quad
+c_{12}=\cos(q_1+q_2).
+$$</div>
+<p>对这个 $2\times2$ 矩阵求行列式：</p>
+<div class="math-block">$$
+\begin{aligned}
+\det J_p
+={}&amp;
+(-l_1s_1-l_2s_{12})(l_2c_{12})\\
+&amp;-
+(-l_2s_{12})(l_1c_1+l_2c_{12})\\
+={}&amp;
+l_1l_2(s_{12}c_1-s_1c_{12})\\
+={}&amp;
+l_1l_2\sin\left[(q_1+q_2)-q_1\right]\\
+={}&amp;
+l_1l_2\sin q_2.
+\end{aligned}
+$$</div>
+<p>所以：</p>
+<div class="math-block">$$
+\boxed{\det J_p=l_1l_2\sin q_2}.
+$$</div>
+<p>当：</p>
+<div class="math-block">$$
+\sin q_2=0,
+$$</div>
+<p>也就是：</p>
+<div class="math-block">$$
+q_2=k\pi,\qquad k\in\mathbb Z,
+$$</div>
+<p>雅可比行列式为零。几何上，两根连杆共线：$q_2=0$ 时伸直，$q_2=\pi$ 时折叠。</p>
+<h3 id="这个时候具体发生了什么">这个时候具体发生了什么</h3>
+<p>一般姿态下，两个关节各自转动，会让末端产生不同方向的瞬时速度。共线时，这两个方向变得线性相关。雅可比的两列没法张成整个平面，末端瞬时速度只能落在一个较小的方向集合里。</p>
+<p>速度关系仍然是：</p>
+<div class="math-block">$$
+\dot x=J_p\dot q.
+$$</div>
+<p>但给定一个任意的末端速度，可能找不到对应的有限关节速度。靠近奇异姿态时，求逆会变得很敏感：末端只要求一点点变化，计算出来的关节速度可能已经很大。</p>
+<p>这和工作空间边界能对上。二连杆伸到最远处：</p>
+<div class="math-block">$$
+\rho=l_1+l_2,
+$$</div>
+<p>或者折到最里面：</p>
+<div class="math-block">$$
+\rho=|l_1-l_2|,
+$$</div>
+<p>两根杆都处于共线构型，正好落在上面算出来的奇异条件里。</p>
+<p>我记这部分时会把三件事连起来：<strong>共线 → 雅可比降秩 → 某些末端方向失去瞬时运动能力。</strong></p>
+<p>---</p>
+<h1 id="第四部分-动力学-力矩从哪里来">第四部分：动力学——力矩从哪里来</h1>
+<h2 id="8-先从最简单的牛顿定律开始">8. 先从最简单的牛顿定律开始</h2>
+<p>平动中：</p>
+<div class="math-block">$$
+F=ma.
+$$</div>
+<p>这句大家都熟悉：要让质量为 $m$ 的物体产生加速度 $a$，就得有相应的力 $F$。</p>
+<p>转动也有对应关系。转动时：</p>
+<ul><li>力对应力矩 $\tau$；</li><li>质量分布对应转动惯量 $I$；</li><li>线加速度对应角加速度 $\alpha$。</li></ul>
+<p>固定轴转动的角动量：</p>
+<div class="math-block">$$
+L=I\omega.
+$$</div>
+<p>力矩等于角动量变化率：</p>
+<div class="math-block">$$
+\tau=\frac{dL}{dt}.
+$$</div>
+<p>当 $I$ 不变时：</p>
+<div class="math-block">$$
+\boxed{\tau=I\alpha}.
+$$</div>
+<p>转动惯量由物体上的质量分布决定：</p>
+<div class="math-block">$$
+I=\int r^2\,dm.
+$$</div>
+<p>我会把它简单记成：<strong>质量离转轴越远，转起来越费劲。</strong> 因为每一小块质量的贡献都乘了距离的平方。</p>
+<p>如果转轴不经过质心，还会用到平行轴定理。质心处转动惯量为 $I_C$，新轴和质心轴相距 $d$：</p>
+<div class="math-block">$$
+I_O=I_C+md^2.
+$$</div>
+<p>机械臂连杆一边平移、一边转动，所以一根连杆的动能既有质心平动部分，也有绕质心转动部分。</p>
+<p>---</p>
+<h2 id="9-先把二连杆的质心找出来">9. 先把二连杆的质心找出来</h2>
+<p>动力学算的是质量怎么动，所以先要知道每根连杆的质心在哪里。</p>
+<h3 id="第一根连杆">第一根连杆</h3>
+<p>质心距第一关节 $r_1$，方向角是 $q_1$：</p>
+<div class="math-block">$$
+p_{c1}=
+\begin{bmatrix}
+r_1\cos q_1\\
+r_1\sin q_1
+\end{bmatrix}.
+$$</div>
+<h3 id="第二根连杆">第二根连杆</h3>
+<p>第二根连杆的质心要先走过第一根连杆，再沿第二根连杆方向走 $r_2$：</p>
+<div class="math-block">$$
+p_{c2}=
+\begin{bmatrix}
+l_1\cos q_1+r_2\cos(q_1+q_2)\\
+l_1\sin q_1+r_2\sin(q_1+q_2)
+\end{bmatrix}.
+$$</div>
+<p>这个写法和 FK 很像。区别是这里要找的是质心位置，第二根连杆只走到距离关节 $r_2$ 的地方，末端 FK 则走完整个 $l_2$。</p>
+<p>---</p>
+<h2 id="10-质心速度-把位置对时间求导">10. 质心速度：把位置对时间求导</h2>
+<h3 id="10-1-第一根连杆">10.1 第一根连杆</h3>
+<p>对 $p_{c1}$ 求导：</p>
+<div class="math-block">$$
+v_{c1}
+=
+\begin{bmatrix}
+-r_1\sin q_1\,\dot q_1\\
+r_1\cos q_1\,\dot q_1
+\end{bmatrix}.
+$$</div>
+<p>两个分量平方相加：</p>
+<div class="math-block">$$
+\begin{aligned}
+\|v_{c1}\|^2
+&amp;=
+r_1^2\sin^2q_1\,\dot q_1^2
++
+r_1^2\cos^2q_1\,\dot q_1^2\\
+&amp;=
+r_1^2\dot q_1^2.
+\end{aligned}
+$$</div>
+<p>最后一步用的是 $\sin^2q_1+\cos^2q_1=1$。这个结果也很直观：质心绕第一关节走圆，线速度大小就是半径乘角速度。</p>
+<h3 id="10-2-第二根连杆">10.2 第二根连杆</h3>
+<p>第二根连杆质心的位置有两段，所以求导后也有两段速度：</p>
+<div class="math-block">$$
+v_{c2}
+=
+\begin{bmatrix}
+-l_1\sin q_1\,\dot q_1
+-r_2\sin(q_1+q_2)(\dot q_1+\dot q_2)\\
+l_1\cos q_1\,\dot q_1
++r_2\cos(q_1+q_2)(\dot q_1+\dot q_2)
+\end{bmatrix}.
+$$</div>
+<p>角度 $q_1+q_2$ 对时间求导时，链式法则会给出 $\dot q_1+\dot q_2$。</p>
+<p>把两个速度分量平方再相加，展开交叉项时会碰到恒等式：</p>
+<div class="math-block">$$
+\cos a\cos b+\sin a\sin b=\cos(a-b).
+$$</div>
+<p>两个方向角之差正好是 $q_2$，所以：</p>
+<div class="math-block">$$
+\boxed{
+\begin{aligned}
+\|v_{c2}\|^2
+={}&amp;
+l_1^2\dot q_1^2
++
+r_2^2(\dot q_1+\dot q_2)^2\\
+&amp;+
+2l_1r_2\cos q_2\,
+\dot q_1(\dot q_1+\dot q_2).
+\end{aligned}}
+$$</div>
+<p>这里的交叉项值得留意：第二根连杆的质心运动同时受两个关节影响，所以速度平方里自然会出现 $\dot q_1\dot q_2$ 这样的乘积。</p>
+<p>两根连杆的角速度分别是：</p>
+<div class="math-block">$$
+\omega_1=\dot q_1,
+\qquad
+\omega_2=\dot q_1+\dot q_2.
+$$</div>
+<p>---</p>
+<h2 id="11-从动能收集出惯性矩阵">11. 从动能收集出惯性矩阵</h2>
+<p>刚体在平面内运动的动能：</p>
+<div class="math-block">$$
+T=
+\frac12m\|v_C\|^2+
+\frac12I_C\omega^2.
+$$</div>
+<p>第一根连杆：</p>
+<div class="math-block">$$
+\begin{aligned}
+T_1
+&amp;=
+\frac12m_1\|v_{c1}\|^2+
+\frac12I_1\omega_1^2\\
+&amp;=
+\frac12(m_1r_1^2+I_1)\dot q_1^2.
+\end{aligned}
+$$</div>
+<p>第二根连杆：</p>
+<div class="math-block">$$
+T_2
+=
+\frac12m_2\|v_{c2}\|^2
++
+\frac12I_2(\dot q_1+\dot q_2)^2.
+$$</div>
+<p>总动能就是两根连杆的动能相加：</p>
+<div class="math-block">$$
+T=T_1+T_2.
+$$</div>
+<p>把 $T$ 展开后，按 $\dot q_1^2$、$\dot q_1\dot q_2$、$\dot q_2^2$ 收集。任何关于关节速度的二次式，都可以写成矩阵二次型：</p>
+<div class="math-block">$$
+\boxed{
+T=\frac12\dot q^TM(q)\dot q}.
+$$</div>
+<p>其中：</p>
+<div class="math-block">$$
+q=
+\begin{bmatrix}
+q_1\\q_2
+\end{bmatrix},
+\qquad
+\dot q=
+\begin{bmatrix}
+\dot q_1\\\dot q_2
+\end{bmatrix}.
+$$</div>
+<p>对二连杆，惯性矩阵为：</p>
+<div class="math-block">$$
+M(q)=
+\begin{bmatrix}
+M_{11}&amp;M_{12}\\
+M_{12}&amp;M_{22}
+\end{bmatrix},
+$$</div>
+<div class="math-block">$$
+\begin{aligned}
+M_{11}
+={}&amp;
+I_1+I_2+m_1r_1^2\\
+&amp;+
+m_2
+\left(
+l_1^2+r_2^2+2l_1r_2\cos q_2
+\right),
+\end{aligned}
+$$</div>
+<div class="math-block">$$
+M_{12}
+=
+I_2+
+m_2\left(r_2^2+l_1r_2\cos q_2\right),
+$$</div>
+<div class="math-block">$$
+M_{22}=I_2+m_2r_2^2.
+$$</div>
+<h3 id="我怎么读这个矩阵">我怎么读这个矩阵</h3>
+<p>先看对角线：</p>
+<ul><li>$M_{11}$：第一关节加速时，系统表现出来的惯性；</li><li>$M_{22}$：第二关节加速时，系统表现出来的惯性。</li></ul>
+<p>再看非对角线 $M_{12}$：两个关节的运动彼此带着对方。比如第二关节加速，第一关节也可能需要额外力矩。</p>
+<p>矩阵是对称的：</p>
+<div class="math-block">$$
+M(q)=M^T(q).
+$$</div>
+<p>原因在于动能是一个标量二次型，交叉项 $\dot q_1\dot q_2$ 的两个矩阵位置必须配成一样。</p>
+<p>只要系统有质量且不是退化模型，非零关节速度应当对应正动能：</p>
+<div class="math-block">$$
+\dot q^TM(q)\dot q=2T&gt;0.
+$$</div>
+<p>所以 $M(q)$ 是正定矩阵。记忆时可以把 $M$ 当作“机械臂姿态相关的转动惯量表”。</p>
+<p>---</p>
+<h2 id="12-势能对关节角求导-得到重力项">12. 势能对关节角求导，得到重力项</h2>
+<p>先约定 $y$ 轴向上。质量 $m$ 在高度 $y$ 的势能：</p>
+<div class="math-block">$$
+U=m g_0 y.
+$$</div>
+<p>第一根连杆质心高度：</p>
+<div class="math-block">$$
+y_{c1}=r_1\sin q_1.
+$$</div>
+<p>第二根连杆质心高度：</p>
+<div class="math-block">$$
+y_{c2}
+=
+l_1\sin q_1+r_2\sin(q_1+q_2).
+$$</div>
+<p>两根连杆势能相加：</p>
+<div class="math-block">$$
+\boxed{
+U(q)
+=
+m_1g_0r_1\sin q_1
++
+m_2g_0
+\left[
+l_1\sin q_1+
+r_2\sin(q_1+q_2)
+\right]}.
+$$</div>
+<p>重力项是势能对关节变量的梯度：</p>
+<div class="math-block">$$
+g(q)=\frac{\partial U}{\partial q}.
+$$</div>
+<p>把它拆成两个偏导：</p>
+<div class="math-block">$$
+g_1(q)=\frac{\partial U}{\partial q_1},
+\qquad
+g_2(q)=\frac{\partial U}{\partial q_2}.
+$$</div>
+<p>逐项求导：</p>
+<div class="math-block">$$
+\boxed{
+g(q)=
+\begin{bmatrix}
+(m_1r_1+m_2l_1)g_0\cos q_1
++
+m_2r_2g_0\cos(q_1+q_2)\\
+m_2r_2g_0\cos(q_1+q_2)
+\end{bmatrix}}.
+$$</div>
+<h3 id="符号怎么检查">符号怎么检查</h3>
+<p>本笔记里 $y$ 轴向上，$q_1=0$ 时第一根杆水平向右。把杆抬起来需要逆时针力矩，也就是正力矩。此时重力补偿项为正，方向符合这个约定。</p>
+<p>静止时：</p>
+<div class="math-block">$$
+\dot q=0,\qquad \ddot q=0.
+$$</div>
+<p>先忽略摩擦和末端负载，维持姿态的力矩就是：</p>
+<div class="math-block">$$
+\boxed{\tau=g(q)}.
+$$</div>
+<p>我会把重力补偿记成：<strong>把当前位置的势能斜率换成关节力矩，再由电机提供相反于重力趋势的作用。</strong></p>
+<p>---</p>
+<h2 id="13-拉格朗日方程-把动能和势能合在一起">13. 拉格朗日方程：把动能和势能合在一起</h2>
+<h3 id="13-1-先组成拉格朗日量">13.1 先组成拉格朗日量</h3>
+<div class="math-block">$$
+L(q,\dot q)=T(q,\dot q)-U(q).
+$$</div>
+<p>$T$ 描述运动带来的能量，$U$ 描述高度带来的能量。将它们放进 $L$ 后，对每个关节变量写：</p>
+<div class="math-block">$$
+\boxed{
+\tau_i
+=
+\frac{d}{dt}
+\left(
+\frac{\partial L}{\partial\dot q_i}
+\right)
+-
+\frac{\partial L}{\partial q_i}}.
+$$</div>
+<p>这里可以按顺序理解：</p>
+<ol><li>先看动能对关节速度有多敏感；</li><li>再看这个量随时间怎样变化；</li><li>再减掉拉格朗日量对关节位置的偏导；</li><li>得到这个关节需要提供的广义力矩。</li></ol>
+<p>把二连杆的 $T$ 和 $U$ 代进去，整理所有关节方程，得到熟悉的结构：</p>
+<div class="math-block">$$
+\boxed{
+\tau
+=
+M(q)\ddot q+
+C(q,\dot q)\dot q+
+g(q)}.
+$$</div>
+<p>我会把这条总式子记成三类账单：</p>
+<div class="math-block">$$
+\underbrace{M(q)\ddot q}_{\text{想加速，要付惯性力矩}}
++
+\underbrace{C(q,\dot q)\dot q}_{\text{关节在运动时，彼此会耦合}}
++
+\underbrace{g(q)}_{\text{想停在这个高度，要抵抗重力}}
+=
+\underbrace{\tau}_{\text{电机给出的力矩}}.
+$$</div>
+<h3 id="13-2-速度二次项从哪来">13.2 速度二次项从哪来</h3>
+<p>惯性矩阵 $M(q)$ 会随姿态变化。关节在运动时，$M$ 的元素也在变，对动能求导自然会产生速度乘积项。</p>
+<p>可以用 Christoffel 符号把这些项写清楚：</p>
+<div class="math-block">$$
+c_{ijk}
+=
+\frac12
+\left(
+\frac{\partial M_{ij}}{\partial q_k}
++
+\frac{\partial M_{ik}}{\partial q_j}
+-
+\frac{\partial M_{jk}}{\partial q_i}
+\right).
+$$</div>
+<p>速度项的第 $i$ 个分量为：</p>
+<div class="math-block">$$
+\left[C(q,\dot q)\dot q\right]_i
+=
+\sum_{j=1}^{n}
+\sum_{k=1}^{n}
+c_{ijk}\dot q_j\dot q_k.
+$$</div>
+<p>记住结构就够了：这里每一项都包含两个关节速度相乘，所以速度相关力矩会随速度平方或速度乘积变化。</p>
+<h3 id="13-3-二连杆的具体结果">13.3 二连杆的具体结果</h3>
+<p>令：</p>
+<div class="math-block">$$
+h=m_2l_1r_2\sin q_2.
+$$</div>
+<p>把二连杆的 $M(q)$ 代进上面的速度项，整理后得到：</p>
+<div class="math-block">$$
+\boxed{
+C(q,\dot q)\dot q
+=
+\begin{bmatrix}
+-h\left(2\dot q_1\dot q_2+\dot q_2^2\right)\\
+h\dot q_1^2
+\end{bmatrix}}.
+$$</div>
+<p>于是完整的二连杆方程：</p>
+<div class="math-block">$$
+\boxed{
+\begin{aligned}
+\tau_1
+={}&amp;
+M_{11}\ddot q_1+
+M_{12}\ddot q_2\\
+&amp;-
+h\left(2\dot q_1\dot q_2+\dot q_2^2\right)
++
+g_1(q),\\
+\tau_2
+={}&amp;
+M_{12}\ddot q_1+
+M_{22}\ddot q_2\\
+&amp;+
+h\dot q_1^2+
+g_2(q).
+\end{aligned}}
+$$</div>
+<p>观察一下：即使 $\ddot q_1=\ddot q_2=0$，只要关节还在转，速度项也可能需要力矩来抵消。</p>
+<p>---</p>
+<h1 id="第五部分-我怎么区分惯性-离心和科氏项">第五部分：我怎么区分惯性、离心和科氏项</h1>
+<h2 id="14-惯性项">14. 惯性项</h2>
+<p>动力学方程中的惯性部分：</p>
+<div class="math-block">$$
+\tau_{\mathrm{inertia}}=M(q)\ddot q.
+$$</div>
+<p>单关节情况退化成：</p>
+<div class="math-block">$$
+\tau=I\ddot q.
+$$</div>
+<p>我会这样记：<strong>想改变运动状态就要对抗惯性。</strong> 关节加速越大、连杆和负载越重，所需力矩通常越大。</p>
+<p>二连杆里：</p>
+<div class="math-block">$$
+\begin{bmatrix}
+\tau_1\\
+\tau_2
+\end{bmatrix}_{\mathrm{inertia}}
+=
+\begin{bmatrix}
+M_{11}&amp;M_{12}\\
+M_{12}&amp;M_{22}
+\end{bmatrix}
+\begin{bmatrix}
+\ddot q_1\\
+\ddot q_2
+\end{bmatrix}.
+$$</div>
+<p>非对角项 $M_{12}$ 说明一个关节的加速度会影响另一个关节的力矩。机械臂的连杆连接在一起，运动自然会相互牵连。</p>
+<h2 id="15-离心项和科氏项">15. 离心项和科氏项</h2>
+<p>二连杆速度相关力矩是：</p>
+<div class="math-block">$$
+\tau_v
+=
+\begin{bmatrix}
+-h\left(2\dot q_1\dot q_2+\dot q_2^2\right)\\
+h\dot q_1^2
+\end{bmatrix}.
+$$</div>
+<p>先按速度的形式分组：</p>
+<ul><li>只有一个速度平方 $\dot q_i^2$ 的，通常称为离心项；</li><li>两个不同关节速度相乘 $\dot q_i\dot q_j$ 的，通常称为科氏项。</li></ul>
+<p>按这个约定，二连杆的离心项可以写成：</p>
+<div class="math-block">$$
+\tau_{\mathrm{centrifugal}}
+=
+\begin{bmatrix}
+-h\dot q_2^2\\
+h\dot q_1^2
+\end{bmatrix},
+$$</div>
+<p>科氏项为：</p>
+<div class="math-block">$$
+\tau_{\mathrm{Coriolis}}
+=
+\begin{bmatrix}
+-2h\dot q_1\dot q_2\\
+0
+\end{bmatrix}.
+$$</div>
+<p>两部分相加，就回到 $\tau_v$。</p>
+<p>在转动参考系中，常见的科氏力、离心力形式为：</p>
+<div class="math-block">$$
+F_{\mathrm{Cor}}
+=
+-2m\,\omega\times v_{\mathrm{rel}},
+$$</div>
+<div class="math-block">$$
+F_{\mathrm{cen}}
+=
+-m\,\omega\times(\omega\times r).
+$$</div>
+<p>我先记住它们对速度的依赖：</p>
+<ul><li>离心项通常跟某个速度平方有关；</li><li>科氏项通常跟两个运动速度的乘积有关；</li><li>在机械臂总方程里，它们放在 $C(q,\dot q)\dot q$ 这一组里。</li></ul>
+<p>不同教材对“科氏项”和“离心项”的拆分记法可能略有差别，做推导时以完整的速度二次项为准。</p>
+<p>---</p>
+<h2 id="16-重力补偿和动力学前馈">16. 重力补偿和动力学前馈</h2>
+<p>忽略摩擦和外力时：</p>
+<div class="math-block">$$
+\tau=
+M(q)\ddot q+
+C(q,\dot q)\dot q+
+g(q).
+$$</div>
+<p>这条式子告诉我，电机要提供的力矩可以按来源拆开。</p>
+<h3 id="只想让机械臂静止悬停">只想让机械臂静止悬停</h3>
+<p>令：</p>
+<div class="math-block">$$
+\dot q=0,\qquad \ddot q=0.
+$$</div>
+<p>剩下：</p>
+<div class="math-block">$$
+\tau_{\mathrm{gravity}}=g(q).
+$$</div>
+<h3 id="想补上期望加速度带来的惯性">想补上期望加速度带来的惯性</h3>
+<div class="math-block">$$
+\tau_{\mathrm{inertia}}=M(q)\ddot q.
+$$</div>
+<h3 id="想补上关节同时运动带来的速度耦合">想补上关节同时运动带来的速度耦合</h3>
+<div class="math-block">$$
+\tau_{\mathrm{velocity}}=C(q,\dot q)\dot q.
+$$</div>
+<h3 id="三类模型项一起计算">三类模型项一起计算</h3>
+<div class="math-block">$$
+\boxed{
+\tau_{\mathrm{ff}}
+=
+M(q)\ddot q+
+C(q,\dot q)\dot q+
+g(q)}.
+$$</div>
+<p>这里的前馈就是：根据当前姿态和希望的运动状态，先用模型算出一个理论力矩，再交给执行器。</p>
+<p>我会记成三问：</p>
+<ol><li>想加速吗？看 $M\ddot q$。</li><li>关节正在一起运动吗？看 $C\dot q$。</li><li>想在这个姿态停住吗？看 $g(q)$。</li></ol>
+<p>模型参数不准、负载变化、摩擦和柔性都会让实际力矩与理想计算值有差异，所以这条式子是理想刚体模型的力矩需求。</p>
+<h2 id="17-末端外力如何进入关节方程">17. 末端外力如何进入关节方程</h2>
+<p>如果末端碰到物体，环境会对末端施加外力 $F_{\mathrm{ext}}$。通过虚功关系，它对应的关节广义力为：</p>
+<div class="math-block">$$
+\tau_{\mathrm{ext}}=J^T(q)F_{\mathrm{ext}}.
+$$</div>
+<p>这里约定 $F_{\mathrm{ext}}$ 是“环境施加在机械臂上的力”。按这个符号约定，动力学方程写为：</p>
+<div class="math-block">$$
+\boxed{
+M(q)\ddot q+
+C(q,\dot q)\dot q+
+g(q)+\tau_f
+=
+\tau+J^T(q)F_{\mathrm{ext}}}.
+$$</div>
+<p>如果把力定义成“机械臂施加给环境的力”，方向会相反，公式右侧相应带负号。写公式时要先说清楚力是谁对谁施加，符号才不会乱。</p>
+<p>---</p>
+<h1 id="把二连杆的思路搬到一般机械臂">把二连杆的思路搬到一般机械臂</h1>
+<h2 id="自由度串联机械臂">自由度串联机械臂</h2>
+<h3 id="末端位置和姿态">末端位置和姿态</h3>
+<p>每个相邻坐标系之间都有一个变换。把这些变换从基座一路乘到末端：</p>
+<div class="math-block">$$
+T_0^n
+=
+T_0^1T_1^2\cdots T_{n-1}^n.
+$$</div>
+<p>如果末端还安装了工具，工具坐标系相对最后一节连杆的变换记作 $T_n^e$，则：</p>
+<div class="math-block">$$
+T_0^e=T_0^nT_n^e.
+$$</div>
+<p>把完整变换拆成旋转和平移：</p>
+<div class="math-block">$$
+T_0^e=
+\begin{bmatrix}
+R_0^e&amp;p_0^e\\
+0_{1\times3}&amp;1
+\end{bmatrix}.
+$$</div>
+<p>这里：</p>
+<ul><li>$p_0^e$ 是末端在基座坐标系中的位置；</li><li>$R_0^e$ 是末端方向相对基座方向的旋转。</li></ul>
+<p>这就是多关节 FK 的统一写法。关节数量变多，连乘的矩阵变多，计算逻辑没有换一套。</p>
+<h3 id="速度和加速度">速度和加速度</h3>
+<p>一般机械臂的速度关系：</p>
+<div class="math-block">$$
+\dot x=J(q)\dot q.
+$$</div>
+<p>继续对时间求导：</p>
+<div class="math-block">$$
+\ddot x
+=
+J(q)\ddot q+
+\dot J(q,\dot q)\dot q.
+$$</div>
+<p>三维任务里，末端线速度和角速度可以堆在一起：</p>
+<div class="math-block">$$
+\begin{bmatrix}
+v_e\\
+\omega_e
+\end{bmatrix}
+=
+J(q)\dot q,
+\qquad
+J(q)\in\mathbb R^{6\times n}.
+$$</div>
+<p>如果关节数少于六，机械臂不能在任意时刻独立控制六个末端速度分量；如果关节数多于六，通常会有多余的关节自由度可以安排。</p>
+<h3 id="能量和动力学">能量和动力学</h3>
+<p>把所有连杆动能加起来：</p>
+<div class="math-block">$$
+T=\frac12\dot q^TM(q)\dot q.
+$$</div>
+<p>把所有连杆重力势能加起来：</p>
+<div class="math-block">$$
+U=U(q).
+$$</div>
+<p>形成拉格朗日量：</p>
+<div class="math-block">$$
+L=T-U.
+$$</div>
+<p>对每个关节使用拉格朗日方程：</p>
+<div class="math-block">$$
+\tau_i
+=
+\frac{d}{dt}
+\left(
+\frac{\partial L}{\partial\dot q_i}
+\right)
+-
+\frac{\partial L}{\partial q_i}.
+$$</div>
+<p>最后整理成统一动力学式：</p>
+<div class="math-block">$$
+\boxed{
+M(q)\ddot q+
+C(q,\dot q)\dot q+
+g(q)+\tau_f
+=
+\tau+J^T(q)F_{\mathrm{ext}}}.
+$$</div>
+<p>我把从二连杆推广到一般机械臂的路线记成：</p>
+<div class="math-block">$$
+\boxed{
+\text{坐标变换}
+\longrightarrow
+\text{FK}
+\longrightarrow
+\text{雅可比}
+\longrightarrow
+\text{动能和势能}
+\longrightarrow
+\text{动力学}}.
+$$</div>
+<p>几何部分告诉我末端在哪里；微分运动学告诉我关节动起来后末端怎么动；能量和拉格朗日方程告诉我需要多大力矩。</p>
+<p>---</p>
+<h2 id="简单记忆且一定要熟悉的公式">简单记忆且一定要熟悉的公式</h2>
+<h2 id="位置和姿态">位置和姿态</h2>
+<p>二连杆 FK：</p>
+<div class="math-block">$$
+\begin{aligned}
+x&amp;=l_1\cos q_1+l_2\cos(q_1+q_2),\\
+y&amp;=l_1\sin q_1+l_2\sin(q_1+q_2),\\
+\phi&amp;=q_1+q_2.
+\end{aligned}
+$$</div>
+<p>记法：每根杆拆成横向和竖向投影，向量首尾相加。</p>
+<h2 id="逆运动学">逆运动学</h2>
+<div class="math-block">$$
+c_2=
+\frac{x^2+y^2-l_1^2-l_2^2}{2l_1l_2},
+\qquad
+s_2=\pm\sqrt{1-c_2^2},
+$$</div>
+<div class="math-block">$$
+q_2=\operatorname{atan2}(s_2,c_2),
+$$</div>
+<div class="math-block">$$
+q_1
+=
+\operatorname{atan2}(y,x)
+-
+\operatorname{atan2}
+\left(
+l_2s_2,
+l_1+l_2c_2
+\right).
+$$</div>
+<p>记法：先用三角形定肘部，再把整个构型转向目标。</p>
+<h2 id="速度-加速度和力">速度、加速度和力</h2>
+<div class="math-block">$$
+\dot x=J\dot q,
+$$</div>
+<div class="math-block">$$
+\ddot x=J\ddot q+\dot J\dot q,
+$$</div>
+<div class="math-block">$$
+\tau=J^TF.
+$$</div>
+<p>记法：速度正向乘 $J$，力矩映射乘 $J^T$；加速度还要记上 $\dot J\dot q$。</p>
+<h2 id="动力学和补偿">动力学和补偿</h2>
+<div class="math-block">$$
+\tau=M(q)\ddot q+C(q,\dot q)\dot q+g(q).
+$$</div>
+<p>加速看 $M$，同时运动看 $C$，悬停看 $g$。</p>
+<div class="math-block">$$
+\tau_{\mathrm{gravity}}=g(q).
+$$</div>
+<p>机械臂想停在当前位置，电机要顶住当前位置对应的重力矩。</p>
+<h1 id="结语">结语</h1>
+<p>真的要理解全部的理论公式才行吗? 其实我觉得不一定,反而我是真的调过整个机械臂之后,做出成果之后才来学习了解推导这些理论公式的. 本文大多数公式和推导过程都是由AI主导写出来的,本猫很多时候直接一边学习AI的推导过程一边加上一点自己的理解,拖拖拉拉的接近一个月才真正看完.虽然也不一定真的能够一步步推导出来,但是至少现在真的看到机械臂的我能从原理开始理解了,很多现象也能通过原理公式进行反推,更多起到了理解和贯穿的作用,</p></div>
+  </article>
+    </section>
+  </main>
+</body>
+</html>

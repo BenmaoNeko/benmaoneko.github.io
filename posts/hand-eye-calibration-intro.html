@@ -30,9 +30,9 @@
         <strong>Benmao</strong>
         <p>Robotics, vision, control and engineering notes.</p>
         <div class="stats">
-          <span><b>4</b>posts</span>
+          <span><b>5</b>posts</span>
           <span><b>3</b>projects</span>
-          <span><b>16</b>tags</span>
+          <span><b>21</b>tags</span>
         </div>
         <div class="profile-links">
           <a href="https://github.com/BenmaoNeko" target="_blank" rel="noreferrer">GitHub</a>
@@ -59,9 +59,17 @@
 <h2 id="相机内参-从原理到实战">相机内参：从原理到实战</h2>
 <h3 id="基本原理">基本原理</h3>
 <p>相机内参描述“相机坐标系中的三维点如何投影到二维像素”。针孔模型中：</p>
-<p>$$ u = f_x \frac{X}{Z} + c_x, \qquad v = f_y \frac{Y}{Z} + c_y $$</p>
+<div class="math-block">$$
+u = f_x \frac{X}{Z} + c_x, \qquad v = f_y \frac{Y}{Z} + c_y
+$$</div>
 <p>内参矩阵为：</p>
-<p>$$ K = \begin{bmatrix} f_x &amp; 0 &amp; c_x \\ 0 &amp; f_y &amp; c_y \\ 0 &amp; 0 &amp; 1 \end{bmatrix} $$</p>
+<div class="math-block">$$
+K = \begin{bmatrix}
+f_x &amp; 0 &amp; c_x \\
+0 &amp; f_y &amp; c_y \\
+0 &amp; 0 &amp; 1
+\end{bmatrix}
+$$</div>
 <ul><li>$f_x, f_y$：以像素为单位的焦距；</li><li>$c_x, c_y$：主点，通常接近图像中心；</li><li>$k_1, k_2, k_3$：径向畸变，主要表现为桶形或枕形弯曲；</li><li>$p_1, p_2$：切向畸变，主要来自镜头去心、光轴偏移或成像系统装配不对称。</li></ul>
 <p>内参标定的本质是：标定板角点的真实几何位置已知，相机能够检测其像素位置；通过多张不同姿态的图像，同时优化 $K$、畸变参数与每张图的标定板位姿，使所有角点的总重投影误差最小。</p>
 <p>不同倾角和距离会产生不同的平面投影约束，有助于分离相机内参与每张图的标定板外参；让标定板覆盖图像边缘，则能更充分地约束镜头畸变。</p>
@@ -73,9 +81,13 @@
 <h2 id="手眼标定的本质">手眼标定的本质</h2>
 <p>相机得到的是“目标在相机坐标系中的位置”，机械臂执行需要的是“目标在机器人基座坐标系中的位置”。手眼标定就是求相机坐标系与机器人坐标系之间固定的 6DoF 刚体变换，包括三个旋转自由度与三个平移自由度。</p>
 <p>本文统一采用“左上标表示目标坐标系、右下标表示来源坐标系”的记法：$^A T_B: B \rightarrow A$。它把在 $B$ 坐标系表达的点转换到 $A$ 坐标系：</p>
-<p>$$ {}^A p = {}^A R_B {}^B p + {}^A t_B $$</p>
+<div class="math-block">$$
+{}^A p = {}^A R_B {}^B p + {}^A t_B
+$$</div>
 <p>坐标变换按照中间坐标系首尾相接：</p>
-<p>$$ {}^A T_C = {}^A T_B {}^B T_C $$</p>
+<div class="math-block">$$
+{}^A T_C = {}^A T_B {}^B T_C
+$$</div>
 <p>常用坐标系如下：</p>
 <div class="table-scroll"><table><thead><tr><th>符号</th><th>含义</th></tr></thead><tbody><tr><td>$B$</td><td>机器人基座 <code>base_link</code></td></tr><tr><td>$G$</td><td>机械臂末端/TCP，例如 <code>planning_tip_link</code></td></tr><tr><td>$C$</td><td>相机光学坐标系</td></tr><tr><td>$T$</td><td>标定板坐标系</td></tr></tbody></table></div>
 <p>内参、PnP 和手眼标定的分工不同：</p>
@@ -83,49 +95,74 @@
 <h2 id="eye-in-hand-眼在手上">Eye-in-hand：眼在手上</h2>
 <h3 id="布局与目标">布局与目标</h3>
 <p>相机固定在机械臂末端，随机械臂一起运动；标定板固定在工作台上。需要求解的手眼外参为：</p>
-<p>$$ {}^G T_C: C \rightarrow G $$</p>
+<div class="math-block">$$
+{}^G T_C: C \rightarrow G
+$$</div>
 <p>它把相机系中的点转换到末端/TCP 系，也就是相机在末端中的位姿。每个姿态需要采集：</p>
 <ul><li>$^B T_G$：机器人末端在基座中的位姿，由 FK/TF 获得；</li><li>$^C T_T$：标定板在相机中的位姿，由 PnP 获得。</li></ul>
 <h3 id="核心不变量与目标转换">核心不变量与目标转换</h3>
 <p>每个姿态满足：</p>
-<p>$$ {}^B T_G(i) {}^G T_C {}^C T_T(i) = {}^B T_T $$</p>
+<div class="math-block">$$
+{}^B T_G(i) {}^G T_C {}^C T_T(i) = {}^B T_T
+$$</div>
 <p>右侧 $^B T_T$ 表示“标定板在机器人基座中的位姿”。因为标定板固定在工作台上，机械臂运动到不同姿态时，这个量应当保持不变。</p>
 <p>需要区分两个固定量：$^G T_C$ 固定，表示相机刚性安装在末端、是待求的手眼外参；$^B T_T$ 固定，表示标定板固定在工作台上、是建立约束和验证结果的不变量。</p>
 <p>标定完成后，目标转换为：</p>
-<p>$$ {}^B T_O = {}^B T_G {}^G T_C {}^C T_O $$</p>
+<div class="math-block">$$
+{}^B T_O = {}^B T_G {}^G T_C {}^C T_O
+$$</div>
 <p>即：目标 → 相机 → 末端 → 机器人基座。</p>
 <h2 id="eye-to-hand-眼在手外">Eye-to-hand：眼在手外</h2>
 <h3 id="布局与目标">布局与目标</h3>
 <p>相机固定在机器人外部；标定板刚性安装在机械臂末端，随机械臂运动。需要求解的外参为：</p>
-<p>$$ {}^B T_C: C \rightarrow B $$</p>
+<div class="math-block">$$
+{}^B T_C: C \rightarrow B
+$$</div>
 <p>它把相机系中的点转换到机器人基座系，也就是相机在基座中的位姿。标定板刚性安装在末端，因此标定板相对末端的安装关系 $^G T_T$ 同样固定。</p>
 <p>每个姿态满足：</p>
-<p>$$ {}^B T_C {}^C T_T(i) = {}^B T_G(i) {}^G T_T $$</p>
+<div class="math-block">$$
+{}^B T_C {}^C T_T(i) = {}^B T_G(i) {}^G T_T
+$$</div>
 <p>左边表示“标定板 → 相机 → 基座”，右边表示“标定板 → 末端 → 基座”；两条路径描述同一个标定板，因此结果必须相等。</p>
 <h3 id="固定量-验证与目标转换">固定量、验证与目标转换</h3>
 <p>Eye-to-hand 同样有两个固定量：</p>
 <ul><li>$^B T_C$ 固定：相机固定在机器人外部，是待求外参；</li><li>$^G T_T$ 固定：标定板刚性安装在末端，是对应的验证不变量。</li></ul>
 <p>因此，Eye-to-hand 中标定板相对机械臂末端的安装位姿 $^G T_T$ 不变；外部相机相对基座的位姿 $^B T_C$ 也固定，且正是待求的手眼外参。</p>
 <p>求出 $^B T_C$ 后，可对每组采样反算标定板安装位姿：</p>
-<p>$$ {}^G T_T(i) = ({}^B T_G(i))^{-1} {}^B T_C {}^C T_T(i) $$</p>
+<div class="math-block">$$
+{}^G T_T(i) = ({}^B T_G(i))^{-1} {}^B T_C {}^C T_T(i)
+$$</div>
 <p>若标定正确，不同姿态反算出的 $^G T_T(i)$ 应当基本一致。目标转换为：</p>
-<p>$$ {}^B T_O = {}^B T_C {}^C T_O $$</p>
+<div class="math-block">$$
+{}^B T_O = {}^B T_C {}^C T_O
+$$</div>
 <p>即：目标 → 相机 → 机器人基座。</p>
 <p>Eye-to-hand 的相机结构稳定、视野较大，适合先在现有七轴机械臂项目中落地。</p>
 <h2 id="ax-xb-的口述理解">AX = XB 的口述理解</h2>
 <p>比较两个不同姿态，可以消掉固定不变的标定板位姿或安装关系，最终得到：</p>
-<p>$$ AX = XB $$</p>
+<div class="math-block">$$
+AX = XB
+$$</div>
 <ul><li>$A$：机器人根据正运动学得到的末端相对运动；</li><li>$B$：相机通过观察标定板得到的相对运动；</li><li>$X$：相机与机器人之间待求的固定外参。</li></ul>
 <p>令 $G_i = {}^B T_G(i)$、$C_i = {}^C T_T(i)$，两种布局下的对应关系为：</p>
-<p>$$ \begin{aligned} \text{Eye-in-hand}: &amp;\quad A = G_j^{-1}G_i, \quad B = C_j C_i^{-1}, \quad X = {}^G T_C \\ \text{Eye-to-hand}: &amp;\quad A = G_jG_i^{-1}, \quad B = C_j C_i^{-1}, \quad X = {}^B T_C \end{aligned} $$</p>
+<div class="math-block">$$
+\begin{aligned}
+\text{Eye-in-hand}: &amp;\quad A = G_j^{-1}G_i, \quad B = C_j C_i^{-1}, \quad X = {}^G T_C \\
+\text{Eye-to-hand}: &amp;\quad A = G_jG_i^{-1}, \quad B = C_j C_i^{-1}, \quad X = {}^B T_C
+\end{aligned}
+$$</div>
 <p>物理上，$A$ 和 $B$ 描述同一次真实运动，只是分别使用机器人坐标系和相机坐标系表达；$X$ 用来完成两种表达之间的转换。</p>
 <p>OpenCV 的 <code>calibrateHandEye</code> 输入的是每个姿态的绝对位姿，函数内部会构造相对运动 $A$、$B$。标准 Eye-in-hand 的输入输出为：</p>
 <ul><li><code>gripper2base</code>：$^B T_G$；</li><li><code>target2cam</code>：$^C T_T$，即 PnP 直接输出；</li><li>返回 <code>cam2gripper</code>：$^G T_C$。</li></ul>
 <p>用同一接口计算 Eye-to-hand 时，需要将机器人位姿取逆后输入第一组参数，第二组仍使用 PnP 的 $^C T_T$。接口变量名很容易造成误解，最终必须用固定关系一致性和物理触点实验验证方向。</p>
 <h2 id="为什么通常先求旋转-再求平移">为什么通常先求旋转，再求平移</h2>
 <p>将 $AX = XB$ 拆开：</p>
-<p>$$ R_A R_X = R_X R_B $$</p>
-<p>$$ (R_A - I)t_X = R_X t_B - t_A $$</p>
+<div class="math-block">$$
+R_A R_X = R_X R_B
+$$</div>
+<div class="math-block">$$
+(R_A - I)t_X = R_X t_B - t_A
+$$</div>
 <p>旋转方程不包含待求平移，因此经典方法通常：</p>
 <ol><li>先求相机与机器人之间的旋转 $R_X$；</li><li>将旋转代入平移方程；</li><li>使用多组数据通过最小二乘求平移 $t_X$。</li></ol>
 <p>常见方法包括：</p>
